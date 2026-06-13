@@ -116,61 +116,72 @@ export default function ProfileSettings() {
 
   useEffect(() => {
     const fetchUserAndProfile = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      setUser(user);
-      
-      if (user) {
-        const { data: profileData, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('user_id', user.id)
-          .single();
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        setUser(user);
 
-        if (profileData && !error) {
-          setProfile({
-            full_name: profileData.full_name || "",
-            bio: profileData.bio || "",
-            avatar_url: profileData.avatar_url || "",
-            phone_number: profileData.phone_number || "",
-            company_address: profileData.company_address || "",
-            researcher_type: profileData.researcher_type,
-            matric_number: profileData.matric_number,
-            department: profileData.department,
-            level: profileData.level,
-            skills: toStringArray(profileData.skills),
-            fields_of_interest: toStringArray(profileData.fields_of_interest),
-            cv_url: profileData.cv_url,
-            availability: profileData.availability,
-            preferred_job_type: toStringArray(profileData.preferred_job_type),
-            bank_name: profileData.bank_name,
-            account_number: profileData.account_number,
-            account_name: profileData.account_name,
-            is_verified: profileData.is_verified,
-            institution_id: profileData.institution_id,
-          });
-        }
+        if (user) {
+          const { data: profileData, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('user_id', user.id)
+            .single();
 
-        // Fetch institutions
-        const { data: institutionsData } = await supabase
-          .from('institutions')
-          .select('id, name')
-          .order('name');
-        
-        if (institutionsData) {
-          setInstitutions(institutionsData);
-        }
+          if (profileData && !error) {
+            setProfile({
+              full_name: profileData.full_name || "",
+              bio: profileData.bio || "",
+              avatar_url: profileData.avatar_url || "",
+              phone_number: profileData.phone_number || "",
+              company_address: profileData.company_address || "",
+              researcher_type: profileData.researcher_type,
+              matric_number: profileData.matric_number,
+              department: profileData.department,
+              level: profileData.level,
+              skills: toStringArray(profileData.skills),
+              fields_of_interest: toStringArray(profileData.fields_of_interest),
+              cv_url: profileData.cv_url,
+              availability: profileData.availability,
+              preferred_job_type: toStringArray(profileData.preferred_job_type),
+              bank_name: profileData.bank_name,
+              account_number: profileData.account_number,
+              account_name: profileData.account_name,
+              is_verified: profileData.is_verified,
+              institution_id: profileData.institution_id,
+            });
+          } else if (error) {
+            toast({ title: "Unable to load profile", description: error.message || "Please refresh and try again.", variant: "destructive" });
+          }
 
-        // Load notification preferences from localStorage
-        const savedNotifPrefs = localStorage.getItem(`notification_prefs_${user.id}`);
-        if (savedNotifPrefs) {
-          setNotificationPrefs(JSON.parse(savedNotifPrefs));
+          // Fetch institutions
+          const { data: institutionsData } = await supabase
+            .from('institutions')
+            .select('id, name')
+            .order('name');
+
+          if (institutionsData) {
+            setInstitutions(institutionsData);
+          }
+
+          // Load notification preferences from localStorage
+          const savedNotifPrefs = localStorage.getItem(`notification_prefs_${user.id}`);
+          if (savedNotifPrefs) {
+            try {
+              setNotificationPrefs(JSON.parse(savedNotifPrefs));
+            } catch {
+              localStorage.removeItem(`notification_prefs_${user.id}`);
+            }
+          }
         }
+      } catch (error: any) {
+        toast({ title: "Unable to load profile", description: error.message || "Please refresh and try again.", variant: "destructive" });
+      } finally {
+        setFetchingProfile(false);
       }
-      setFetchingProfile(false);
     };
 
     fetchUserAndProfile();
-  }, []);
+  }, [toast]);
 
   const handleUpdateProfile = async () => {
     if (!user) return;
