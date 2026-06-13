@@ -8,6 +8,7 @@ import { ThemeProvider } from "next-themes";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import ScrollToTop from "@/components/ScrollToTop";
 import { CurrencyProvider } from "./context/CurrencyContext";
+import { AppSettingsProvider } from "./hooks/useAppSettings";
 import { PlatformSettingsProvider } from "./hooks/usePlatformSettings";
 
 // Lazy load all pages for code splitting
@@ -170,14 +171,15 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
       <PlatformSettingsProvider>
-        <CurrencyProvider>
-          <TooltipProvider>
-            <Toaster />
-            <Sonner />
-            <BrowserRouter>
-              <ScrollToTop />
-              <Suspense fallback={<PageLoader />}>
-                <Routes>
+        <AppSettingsProvider>
+          <CurrencyProvider>
+            <TooltipProvider>
+              <Toaster />
+              <Sonner />
+              <BrowserRouter>
+                <ScrollToTop />
+                <Suspense fallback={<PageLoader />}>
+                  <Routes>
                   <Route path="/" element={<Landing />} />
                   <Route path="/auth" element={<Auth />} />
                   <Route path="/verify-email" element={<VerifyEmail />} />
@@ -1012,8 +1014,9 @@ const App = () => (
                 </Routes>
               </Suspense>
             </BrowserRouter>
-          </TooltipProvider>
-        </CurrencyProvider>
+            </TooltipProvider>
+          </CurrencyProvider>
+        </AppSettingsProvider>
       </PlatformSettingsProvider>
     </ThemeProvider>
   </QueryClientProvider>

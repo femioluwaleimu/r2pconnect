@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Settings, Shield, Bell, Mail, Info, Globe, Key, Loader2, Upload, Image, X } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -16,6 +17,9 @@ interface PlatformSettings {
   platform_logo: string;
   download_credit_rate_ngn: string;
   ipn_activation_fee_ngn: string;
+  ai_primary_provider: "openai" | "deepseek";
+  ai_fallback_provider: "openai" | "deepseek";
+  app_notifications: boolean;
   email_notifications: boolean;
   new_user_alerts: boolean;
   system_alerts: boolean;
@@ -29,6 +33,9 @@ const defaultSettings: PlatformSettings = {
   platform_logo: "",
   download_credit_rate_ngn: "100",
   ipn_activation_fee_ngn: "5000",
+  ai_primary_provider: "openai",
+  ai_fallback_provider: "deepseek",
+  app_notifications: true,
   email_notifications: true,
   new_user_alerts: true,
   system_alerts: true,
@@ -63,7 +70,11 @@ export default function AdminSettings() {
           const key = item.key;
           if (key === 'platform_name' || key === 'support_email' || key === 'platform_logo' || key === 'download_credit_rate_ngn' || key === 'ipn_activation_fee_ngn') {
             settingsObj[key] = item.value || '';
-          } else if (key === 'email_notifications' || key === 'new_user_alerts' || key === 'system_alerts' || key === 'require_email_verification' || key === 'two_factor_auth') {
+          } else if (key === 'ai_primary_provider' || key === 'ai_fallback_provider') {
+            if (item.value === 'openai' || item.value === 'deepseek') {
+              settingsObj[key] = item.value;
+            }
+          } else if (key === 'app_notifications' || key === 'email_notifications' || key === 'new_user_alerts' || key === 'system_alerts' || key === 'require_email_verification' || key === 'two_factor_auth') {
             settingsObj[key] = item.value === 'true';
           }
         });
@@ -329,6 +340,65 @@ export default function AdminSettings() {
             </CardContent>
           </Card>
 
+          {/* AI Settings */}
+          <Card className="shadow-card rounded-2xl border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Settings className="w-5 h-5 text-primary" />
+                AI Provider Settings
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-4 md:grid-cols-2">
+              <div>
+                <Label>Primary AI Provider</Label>
+                <Select
+                  value={settings.ai_primary_provider}
+                  onValueChange={(value: "openai" | "deepseek") => {
+                    updateSetting('ai_primary_provider', value);
+                    if (value === settings.ai_fallback_provider) {
+                      updateSetting('ai_fallback_provider', value === 'openai' ? 'deepseek' : 'openai');
+                    }
+                  }}
+                >
+                  <SelectTrigger className="rounded-xl mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="openai">OpenAI</SelectItem>
+                    <SelectItem value="deepseek">DeepSeek</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Used first for AI requests.
+                </p>
+              </div>
+
+              <div>
+                <Label>Fallback AI Provider</Label>
+                <Select
+                  value={settings.ai_fallback_provider}
+                  onValueChange={(value: "openai" | "deepseek") => {
+                    updateSetting('ai_fallback_provider', value);
+                    if (value === settings.ai_primary_provider) {
+                      updateSetting('ai_primary_provider', value === 'openai' ? 'deepseek' : 'openai');
+                    }
+                  }}
+                >
+                  <SelectTrigger className="rounded-xl mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="deepseek">DeepSeek</SelectItem>
+                    <SelectItem value="openai">OpenAI</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Used automatically when the primary provider fails or has no available credit.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Notification Settings */}
           <Card className="shadow-card rounded-2xl border-border/50">
             <CardHeader>
@@ -338,6 +408,16 @@ export default function AdminSettings() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="font-medium">App Notifications</p>
+                  <p className="text-sm text-muted-foreground">Show in-app notifications across dashboards</p>
+                </div>
+                <Switch
+                  checked={settings.app_notifications}
+                  onCheckedChange={(checked) => updateSetting('app_notifications', checked)}
+                />
+              </div>
               <div className="flex items-center justify-between">
                 <div>
                   <p className="font-medium">Email Notifications</p>

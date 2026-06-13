@@ -5,6 +5,9 @@ export interface AppSettings {
   platform_name: string;
   platform_logo: string | null;
   support_email: string;
+  ai_primary_provider: "openai" | "deepseek";
+  ai_fallback_provider: "openai" | "deepseek";
+  app_notifications: boolean;
   email_notifications: boolean;
   new_user_alerts: boolean;
   system_alerts: boolean;
@@ -18,6 +21,9 @@ const defaultSettings: Omit<AppSettings, 'loading' | 'refetch'> = {
   platform_name: "R2P CONNECT",
   platform_logo: null,
   support_email: "",
+  ai_primary_provider: "openai",
+  ai_fallback_provider: "deepseek",
+  app_notifications: true,
   email_notifications: true,
   new_user_alerts: true,
   system_alerts: true,
@@ -49,7 +55,12 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
           const key = item.key as keyof typeof settingsObj;
           if (key === 'platform_name' || key === 'support_email' || key === 'platform_logo') {
             (settingsObj as any)[key] = item.value || '';
+          } else if (key === 'ai_primary_provider' || key === 'ai_fallback_provider') {
+            if (item.value === 'openai' || item.value === 'deepseek') {
+              (settingsObj as any)[key] = item.value;
+            }
           } else if (
+            key === 'app_notifications' ||
             key === 'email_notifications' || 
             key === 'new_user_alerts' || 
             key === 'system_alerts' || 
@@ -87,6 +98,11 @@ export function useAppSettings() {
 export function useNotificationsEnabled() {
   const { email_notifications } = useAppSettings();
   return email_notifications;
+}
+
+export function useAppNotificationsEnabled() {
+  const { app_notifications } = useAppSettings();
+  return app_notifications;
 }
 
 export function useNewUserAlertsEnabled() {

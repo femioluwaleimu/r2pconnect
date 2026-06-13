@@ -7,13 +7,14 @@ namespace App\Controllers;
 
 use App\Core\Controller;
 use App\Core\Response;
+use App\Services\AIProvider;
 
 class AIController extends Controller {
-    private string $lovableApiKey;
+    private AIProvider $aiProvider;
 
     public function __construct() {
         parent::__construct();
-        $this->lovableApiKey = env('LOVABLE_API_KEY', '');
+        $this->aiProvider = new AIProvider();
     }
 
     /**
@@ -312,17 +313,35 @@ class AIController extends Controller {
      * Generic AI Service Call
      */
     private function callAIService(string $prompt): ?array {
-        // This is a placeholder for actual AI service integration
-        // In production, this would call Lovable AI or similar service
-        
-        // For now, log the request and return mock data
         log_message('info', "AI Service Call: " . substr($prompt, 0, 100) . "...");
 
-        // Mock response structure
+        $response = $this->aiProvider->chat([
+            ['role' => 'system', 'content' => 'You are a helpful academic research assistant.'],
+            ['role' => 'user', 'content' => $prompt],
+        ]);
+
+        $text = $response['content'];
+        $topics = null;
+        $decoded = json_decode($text, true);
+        if (is_array($decoded)) {
+            $topics = $this->isList($decoded) ? $decoded : ($decoded['topics'] ?? null);
+        }
+
         return [
-            'text' => 'AI response placeholder. In production, this would call the actual AI service.',
-            'tokens_used' => 100,
-            'success' => true
+            'text' => $text,
+            'topics' => $topics,
+            'score' => 0,
+            'tokens_used' => $response['usage']['total_tokens'] ?? null,
+            'provider' => $response['provider'],
+            'success' => true,
         ];
+    }
+
+    private function isList(array $value): bool {
+        if ($value === []) {
+            return true;
+        }
+
+        return array_keys($value) === range(0, count($value) - 1);
     }
 }

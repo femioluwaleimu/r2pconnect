@@ -22,10 +22,10 @@ serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
+    const openAiApiKey = Deno.env.get("OPENAI_API_KEY");
 
-    if (!lovableApiKey) {
-      throw new Error("LOVABLE_API_KEY is not configured");
+    if (!openAiApiKey) {
+      throw new Error("OPENAI_API_KEY is not configured");
     }
 
     const authHeader = req.headers.get("Authorization");
@@ -370,14 +370,14 @@ Provide your ${isAdvancedMode ? "comprehensive 19-section deep" : isLearningMode
 
     console.log(`Analyzing chapter "${chapter_name}" in ${review_mode} mode for research ${research_id}`);
 
-    const aiResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${lovableApiKey}`,
+        Authorization: `Bearer ${openAiApiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: isAdvancedMode ? "openai/gpt-5.2" : "google/gemini-3-flash-preview",
+        model: isAdvancedMode ? "gpt-4o-mini" : "google/gemini-3-flash-preview",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
@@ -400,8 +400,8 @@ Provide your ${isAdvancedMode ? "comprehensive 19-section deep" : isLearningMode
         });
       }
       const errorText = await aiResponse.text();
-      console.error("AI Gateway error:", aiResponse.status, errorText);
-      throw new Error(`AI Gateway error: ${aiResponse.status}`);
+      console.error("OpenAI API error:", aiResponse.status, errorText);
+      throw new Error(`OpenAI API error: ${aiResponse.status}`);
     }
 
     const aiData = await aiResponse.json();
