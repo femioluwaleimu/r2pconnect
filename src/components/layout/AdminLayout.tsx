@@ -58,6 +58,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [profileName, setProfileName] = useState<string | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
@@ -81,9 +82,13 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
 
   useEffect(() => {
     if (user) {
-      supabase.from("profiles").select("avatar_url").eq("user_id", user.id).maybeSingle().then(({ data }) => {
+      supabase.from("profiles").select("full_name, avatar_url").eq("user_id", user.id).maybeSingle().then(({ data }) => {
+        if (data?.full_name) setProfileName(data.full_name);
         if (data?.avatar_url) setAvatarUrl(data.avatar_url);
       });
+    } else {
+      setProfileName(null);
+      setAvatarUrl(null);
     }
   }, [user]);
 
@@ -93,7 +98,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
     toast({ title: "Signed out successfully" });
   };
 
-  const userName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Admin";
+  const userName = profileName || user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Admin";
 
   return (
     <div className="min-h-screen bg-background flex">

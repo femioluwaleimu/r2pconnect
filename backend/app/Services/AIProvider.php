@@ -64,12 +64,14 @@ class AIProvider {
     }
 
     private function providerConfig(string $provider, array $options): array {
+        $settings = $this->settings(['openai_model', 'deepseek_model']);
+
         if ($provider === 'deepseek') {
             return [
                 'provider' => 'deepseek',
                 'api_key' => env('DEEPSEEK_API_KEY', ''),
                 'url' => env('DEEPSEEK_API_URL', 'https://api.deepseek.com/chat/completions'),
-                'model' => $options['deepseek_model'] ?? env('DEEPSEEK_MODEL', 'deepseek-chat'),
+                'model' => $options['deepseek_model'] ?? $settings['deepseek_model'] ?? env('DEEPSEEK_MODEL', 'deepseek-v4-flash'),
             ];
         }
 
@@ -77,7 +79,7 @@ class AIProvider {
             'provider' => 'openai',
             'api_key' => env('OPENAI_API_KEY', ''),
             'url' => env('OPENAI_API_URL', 'https://api.openai.com/v1/chat/completions'),
-            'model' => $options['openai_model'] ?? env('OPENAI_MODEL', 'gpt-4o-mini'),
+            'model' => $options['openai_model'] ?? $settings['openai_model'] ?? env('OPENAI_MODEL', 'gpt-5.4-mini'),
         ];
     }
 
@@ -94,11 +96,16 @@ class AIProvider {
         $payload = [
             'model' => $config['model'],
             'messages' => $messages,
-            'temperature' => $options['temperature'] ?? 0.4,
         ];
 
+        $temperature = $options['temperature'] ?? 0.4;
+        if (!$this->usesDefaultOnlyTemperature($config['provider'], $config['model'])) {
+            $payload['temperature'] = $temperature;
+        }
+
         if (!empty($options['max_tokens'])) {
-            $payload['max_tokens'] = (int)$options['max_tokens'];
+            $tokenKey = $this->tokenParameter($config['provider'], $config['model']);
+            $payload[$tokenKey] = (int)$options['max_tokens'];
         }
 
         $headers = [
@@ -129,6 +136,20 @@ class AIProvider {
             'model' => $config['model'],
             'usage' => $data['usage'] ?? null,
         ];
+    }
+
+    private function tokenParameter(string $provider, string $model): string {
+        $model = strtolower($model);
+        if ($provider === 'openai' && (str_starts_with($model, 'gpt-5') || str_starts_with($model, 'o'))) {
+            return 'max_completion_tokens';
+        }
+
+        return 'max_tokens';
+    }
+
+    private function usesDefaultOnlyTemperature(string $provider, string $model): bool {
+        $model = strtolower($model);
+        return $provider === 'openai' && (str_starts_with($model, 'gpt-5') || str_starts_with($model, 'o'));
     }
 
     private function postJson(string $url, array $headers, array $payload): array {

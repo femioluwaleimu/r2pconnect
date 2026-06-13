@@ -27,6 +27,7 @@ interface Profile {
   department: string | null;
   level: string | null;
   skills: string[] | null;
+  fields_of_interest: string[] | null;
   cv_url: string | null;
   availability: string | null;
   preferred_job_type: string[] | null;
@@ -47,6 +48,30 @@ interface Institution {
   id: string;
   name: string;
 }
+
+const toStringArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.map(String).filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map(String).filter(Boolean);
+      }
+    } catch {
+      // Treat as comma-separated legacy text below.
+    }
+
+    return trimmed.split(",").map((item) => item.trim()).filter(Boolean);
+  }
+
+  return [];
+};
 
 export default function ProfileSettings() {
   const [user, setUser] = useState<User | null>(null);
@@ -73,6 +98,7 @@ export default function ProfileSettings() {
     department: null,
     level: null,
     skills: [],
+    fields_of_interest: [],
     cv_url: null,
     availability: null,
     preferred_job_type: [],
@@ -111,10 +137,11 @@ export default function ProfileSettings() {
             matric_number: profileData.matric_number,
             department: profileData.department,
             level: profileData.level,
-            skills: profileData.skills || [],
+            skills: toStringArray(profileData.skills),
+            fields_of_interest: toStringArray(profileData.fields_of_interest),
             cv_url: profileData.cv_url,
             availability: profileData.availability,
-            preferred_job_type: profileData.preferred_job_type || [],
+            preferred_job_type: toStringArray(profileData.preferred_job_type),
             bank_name: profileData.bank_name,
             account_number: profileData.account_number,
             account_name: profileData.account_name,
@@ -163,6 +190,7 @@ export default function ProfileSettings() {
           department: profile.department,
           level: profile.level,
           skills: profile.skills,
+          fields_of_interest: profile.fields_of_interest,
           cv_url: profile.cv_url,
           availability: profile.availability,
           preferred_job_type: profile.preferred_job_type,
@@ -467,11 +495,11 @@ export default function ProfileSettings() {
                 <div>
                   <Label>Fields of Interest</Label>
                   <Textarea
-                    value={(profile as any).fields_of_interest?.join(', ') || ""}
+                    value={profile.fields_of_interest?.join(', ') || ""}
                     onChange={(e) => setProfile(prev => ({ 
                       ...prev, 
                       fields_of_interest: e.target.value.split(',').map(f => f.trim()).filter(Boolean) 
-                    } as any))}
+                    }))}
                     placeholder="e.g. Machine Learning, Data Science, Artificial Intelligence"
                     className="rounded-xl mt-1"
                   />

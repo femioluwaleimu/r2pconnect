@@ -60,6 +60,7 @@ export default function IPNLayout({ children }: IPNLayoutProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [profileName, setProfileName] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [activationStatus, setActivationStatus] = useState<string | null>(null);
@@ -85,8 +86,9 @@ export default function IPNLayout({ children }: IPNLayoutProps) {
 
   useEffect(() => {
     if (user) {
-      supabase.from("profiles").select("avatar_url").eq("user_id", user.id).maybeSingle().then(({ data }) => {
-        if (data?.avatar_url) setAvatarUrl(data.avatar_url);
+      supabase.from("profiles").select("full_name, avatar_url").eq("user_id", user.id).maybeSingle().then(({ data }) => {
+        setProfileName(data?.full_name || null);
+        setAvatarUrl(data?.avatar_url || null);
       });
       fetchNotifications();
       // Check activation
@@ -94,6 +96,9 @@ export default function IPNLayout({ children }: IPNLayoutProps) {
         setActivationStatus(data?.status || null);
         setActivationChecked(true);
       });
+    } else {
+      setProfileName(null);
+      setAvatarUrl(null);
     }
   }, [user]);
 
@@ -127,7 +132,7 @@ export default function IPNLayout({ children }: IPNLayoutProps) {
     toast({ title: "Signed out successfully" });
   };
 
-  const userName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "User";
+  const userName = profileName || user?.user_metadata?.full_name || user?.email?.split("@")[0] || "User";
 
   // Gate: redirect to activation if not activated
   const isProtectedPage = ["/ipn/companies", "/ipn/opportunities", "/ipn/applicants"].some(

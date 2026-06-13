@@ -70,6 +70,7 @@ export default function IndustryLayout({ children }: IndustryLayoutProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [profileName, setProfileName] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -97,8 +98,9 @@ export default function IndustryLayout({ children }: IndustryLayoutProps) {
 
   useEffect(() => {
     if (user) {
-      supabase.from("profiles").select("avatar_url").eq("user_id", user.id).maybeSingle().then(({ data }) => {
-        if (data?.avatar_url) setAvatarUrl(data.avatar_url);
+      supabase.from("profiles").select("full_name, avatar_url").eq("user_id", user.id).maybeSingle().then(({ data }) => {
+        setProfileName(data?.full_name || null);
+        setAvatarUrl(data?.avatar_url || null);
       });
       fetchNotifications();
 
@@ -180,6 +182,9 @@ export default function IndustryLayout({ children }: IndustryLayoutProps) {
         supabase.removeChannel(notificationChannel);
         supabase.removeChannel(submissionChannel);
       };
+    } else {
+      setProfileName(null);
+      setAvatarUrl(null);
     }
   }, [user]);
   
@@ -213,7 +218,7 @@ export default function IndustryLayout({ children }: IndustryLayoutProps) {
     toast({ title: "Signed out successfully" });
   };
 
-  const userName = user?.user_metadata?.full_name || user?.email?.split("@")[0] || "User";
+  const userName = profileName || user?.user_metadata?.full_name || user?.email?.split("@")[0] || "User";
   const companyName = user?.user_metadata?.company_name || "Company";
 
   return (

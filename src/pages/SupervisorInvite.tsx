@@ -140,7 +140,8 @@ export default function SupervisorInvite() {
           department: invite.department,
           max_students: 10,
           current_students: 0,
-          is_active: true
+          is_active: false,
+          verification_status: "pending_verification"
         });
 
         // Update profile with institution_id

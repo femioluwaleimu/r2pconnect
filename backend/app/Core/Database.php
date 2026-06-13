@@ -76,6 +76,10 @@ class Database {
         $stmt = $conn->prepare($sql);
 
         foreach (array_values($params) as $index => $value) {
+            if (is_array($value) || is_object($value)) {
+                $value = json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            }
+
             $type = PDO::PARAM_STR;
             if (is_int($value)) {
                 $type = PDO::PARAM_INT;

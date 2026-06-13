@@ -19,8 +19,12 @@ import {
   Users,
   Send,
   Copy,
-  Check
+  Check,
+  CheckCircle,
+  XCircle,
+  Clock
 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 interface Supervisor {
   id: string;
@@ -29,6 +33,7 @@ interface Supervisor {
   current_students: number;
   max_students: number;
   is_active: boolean;
+  verification_status: string | null;
   profile: {
     full_name: string;
     email: string;
@@ -51,9 +56,11 @@ export default function InstitutionSupervisors() {
   const [institutionId, setInstitutionId] = useState<string | null>(null);
   const [institutionName, setInstitutionName] = useState<string>("");
   const [supervisors, setSupervisors] = useState<Supervisor[]>([]);
+  const [pendingSupervisors, setPendingSupervisors] = useState<Supervisor[]>([]);
   const [invites, setInvites] = useState<SupervisorInvite[]>([]);
   const [loading, setLoading] = useState(true);
   const [addingSupervisor, setAddingSupervisor] = useState(false);
+  const [approvalLoading, setApprovalLoading] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
@@ -101,10 +108,10 @@ export default function InstitutionSupervisors() {
         department,
         current_students,
         max_students,
-        is_active
+        is_active,
+        verification_status
       `)
-      .eq('institution_id', instId)
-      .eq('is_active', true);
+      .eq('institution_id', instId);
 
     // Also get accepted invites (for supervisors who registered but may not have supervisor record)
     const { data: acceptedInvites } = await supabase
@@ -114,6 +121,7 @@ export default function InstitutionSupervisors() {
       .eq('status', 'accepted');
 
     const allSupervisors: Supervisor[] = [];
+    const pending: Supervisor[] = [];
     const allUserIds: string[] = [];
 
     // Add supervisors from supervisors table
@@ -129,16 +137,22 @@ export default function InstitutionSupervisors() {
       const profileMap = new Map(profiles?.map(p => [p.user_id, p]) || []);
 
       supervisorData.forEach(s => {
-        allSupervisors.push({
+        const record = {
           ...s,
           profile: profileMap.get(s.user_id) || null
-        });
+        };
+
+        if (s.verification_status === "pending_verification" || !s.is_active) {
+          pending.push(record);
+        } else {
+          allSupervisors.push(record);
+        }
       });
     }
 
     // Add accepted invites that don't have a supervisor record yet
     if (acceptedInvites && acceptedInvites.length > 0) {
-      const existingUserIds = new Set(allSupervisors.map(s => s.user_id));
+      const existingUserIds = new Set([...allSupervisors, ...pending].map(s => s.user_id));
       
       // Get profiles for accepted invites by email
       const { data: inviteProfiles } = await supabase
@@ -159,6 +173,7 @@ export default function InstitutionSupervisors() {
             current_students: 0,
             max_students: 10,
             is_active: true,
+            verification_status: "verified",
             profile: {
               full_name: profile.full_name,
               email: profile.email,
@@ -194,10 +209,15 @@ export default function InstitutionSupervisors() {
           const studentSet = studentCountMap.get(s.user_id);
           s.current_students = studentSet ? studentSet.size : 0;
         });
+        pending.forEach(s => {
+          const studentSet = studentCountMap.get(s.user_id);
+          s.current_students = studentSet ? studentSet.size : 0;
+        });
       }
     }
 
     setSupervisors(allSupervisors);
+    setPendingSupervisors(pending);
     setLoading(false);
   };
 
@@ -293,13 +313,83 @@ export default function InstitutionSupervisors() {
   const handleRemoveSupervisor = async (supervisorId: string) => {
     const { error } = await supabase
       .from('supervisors')
-      .update({ is_active: false })
+      .update({ is_active: false, verification_status: 'deactivated' })
       .eq('id', supervisorId);
 
     if (!error) {
       toast({ title: "Supervisor deactivated", description: "Supervisor access has been revoked" });
       setSupervisors(supervisors.filter(s => s.id !== supervisorId));
     }
+  };
+
+  const handleApproveSupervisor = async (supervisor: Supervisor) => {
+    if (!institutionId) return;
+
+    setApprovalLoading(supervisor.id);
+    const { error } = await supabase
+      .from('supervisors')
+      .update({ is_active: true, verification_status: 'verified' })
+      .eq('id', supervisor.id)
+      .eq('institution_id', institutionId);
+
+    if (!error) {
+      await supabase.from('supervisor_activity_logs').insert({
+        supervisor_id: supervisor.user_id,
+        action_type: 'verified_by_institution',
+        details: `Approved by ${institutionName} at ${new Date().toISOString()}`,
+      });
+
+      await supabase.from('notifications').insert({
+        user_id: supervisor.user_id,
+        title: 'Supervisor Account Approved',
+        message: `Your supervisor account has been approved by ${institutionName}.`,
+        type: 'success',
+      });
+
+      toast({
+        title: 'Supervisor approved',
+        description: `${supervisor.profile?.full_name || 'Supervisor'} is now active.`,
+      });
+      fetchSupervisors(institutionId);
+    } else {
+      toast({ title: 'Approval failed', description: error.message, variant: 'destructive' });
+    }
+    setApprovalLoading(null);
+  };
+
+  const handleRejectSupervisor = async (supervisor: Supervisor) => {
+    if (!institutionId) return;
+
+    setApprovalLoading(supervisor.id);
+    const { error } = await supabase
+      .from('supervisors')
+      .update({ is_active: false, verification_status: 'rejected' })
+      .eq('id', supervisor.id)
+      .eq('institution_id', institutionId);
+
+    if (!error) {
+      await supabase.from('supervisor_activity_logs').insert({
+        supervisor_id: supervisor.user_id,
+        action_type: 'rejected_by_institution',
+        details: `Rejected by ${institutionName} at ${new Date().toISOString()}`,
+      });
+
+      await supabase.from('notifications').insert({
+        user_id: supervisor.user_id,
+        title: 'Supervisor Account Rejected',
+        message: `Your supervisor account was not approved by ${institutionName}. Please contact the institution admin.`,
+        type: 'error',
+      });
+
+      toast({
+        title: 'Supervisor rejected',
+        description: `${supervisor.profile?.full_name || 'Supervisor'} has been rejected.`,
+      });
+      fetchSupervisors(institutionId);
+    } else {
+      toast({ title: 'Rejection failed', description: error.message, variant: 'destructive' });
+    }
+    setApprovalLoading(null);
   };
 
   const handleCancelInvite = async (inviteId: string) => {
@@ -505,6 +595,73 @@ export default function InstitutionSupervisors() {
                       className="text-destructive hover:bg-destructive/10 rounded-lg"
                     >
                       <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Pending Supervisor Approvals */}
+        {pendingSupervisors.length > 0 && (
+          <Card className="rounded-2xl border-amber-200/70 bg-amber-50/50 dark:bg-amber-950/10">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Clock className="w-5 h-5 text-amber-500" />
+                Pending Supervisor Approvals ({pendingSupervisors.length})
+              </CardTitle>
+              <CardDescription>
+                Review supervisors who accepted an invitation and are waiting for institution approval.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {pendingSupervisors.map((supervisor) => (
+                <div key={supervisor.id} className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-4 bg-background rounded-xl border">
+                  <div className="flex items-center gap-4 min-w-0">
+                    <div className="w-12 h-12 rounded-xl bg-amber-500/15 flex items-center justify-center text-amber-600 font-bold text-lg">
+                      {supervisor.profile?.full_name?.charAt(0).toUpperCase() || "S"}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold text-foreground">{supervisor.profile?.full_name || "Unknown"}</p>
+                        <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/20">
+                          <Clock className="w-3 h-3 mr-1" />
+                          Pending
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-muted-foreground flex items-center gap-1">
+                        <Mail className="w-3 h-3" />
+                        {supervisor.profile?.email || "No email"}
+                      </p>
+                      {supervisor.department && (
+                        <p className="text-xs text-muted-foreground mt-0.5">{supervisor.department}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white"
+                      onClick={() => handleApproveSupervisor(supervisor)}
+                      disabled={approvalLoading === supervisor.id}
+                    >
+                      {approvalLoading === supervisor.id ? (
+                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                      ) : (
+                        <CheckCircle className="w-4 h-4 mr-1" />
+                      )}
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="rounded-xl text-destructive border-destructive/30 hover:bg-destructive/10"
+                      onClick={() => handleRejectSupervisor(supervisor)}
+                      disabled={approvalLoading === supervisor.id}
+                    >
+                      <XCircle className="w-4 h-4 mr-1" />
+                      Reject
                     </Button>
                   </div>
                 </div>

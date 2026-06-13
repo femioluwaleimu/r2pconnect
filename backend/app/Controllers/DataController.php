@@ -116,7 +116,7 @@ class DataController extends Controller {
                         continue;
                     }
                     $sets[] = "`{$column}` = ?";
-                    $params[] = $value;
+                    $params[] = $this->normalizeValue($value);
                 }
 
                 $where = $this->buildWhere(is_array($filters) ? $filters : []);
@@ -278,10 +278,18 @@ class DataController extends Controller {
         foreach ($row as $column => $value) {
             $column = $this->identifier((string)$column);
             if ($column) {
-                $clean[$column] = $value;
+                $clean[$column] = $this->normalizeValue($value);
             }
         }
         return $clean;
+    }
+
+    private function normalizeValue(mixed $value): mixed {
+        if (is_array($value) || is_object($value)) {
+            return json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        }
+
+        return $value;
     }
 
     private function identifier(string $identifier): ?string {

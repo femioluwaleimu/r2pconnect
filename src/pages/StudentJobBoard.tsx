@@ -49,9 +49,13 @@ interface FeedbackMessage {
 
 const JOB_TYPE_LABELS: Record<string, string> = {
   part_time: "Part-time",
+  "part-time": "Part-time",
+  "full-time": "Full-time",
   siwes: "SIWES",
   industrial_training: "Industrial Training",
   internship: "Internship",
+  contract: "Contract",
+  freelance: "Freelance",
 };
 
 export default function StudentJobBoard() {
@@ -69,39 +73,114 @@ export default function StudentJobBoard() {
     handlePaystackReturn();
   }, []);
 
+  const safeMessage = (error: any, fallback: string) => {
+    if (!error) return fallback;
+    if (typeof error.message === "string") return error.message;
+    if (typeof error.error === "string") return error.error;
+    return fallback;
+  };
+
   const fetchApplications = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
       // Fetch direct job applications
-      const { data: directData, error: directError } = await supabase
+      let { data: directData, error: directError } = await supabase
         .from("job_applications")
-        .select("id, job_id, status, rejection_reason, employer_feedback, cover_letter, created_at, student_level, job_postings(title, job_type, company_name, company_city, company_location, deadline, duration, payment_amount, payment_currency)")
+        .select("id, job_id, status, rejection_reason, employer_feedback, cover_letter, created_at, student_level")
         .eq("student_id", user.id)
         .order("created_at", { ascending: false });
 
-      if (directError) throw directError;
+      if (directError) {
+        const fallback = await supabase
+          .from("job_applications")
+          .select("id, job_id, status, cover_letter, created_at")
+          .eq("student_id", user.id)
+          .order("created_at", { ascending: false });
 
-      const directApps = (directData || []).map((a: any) => ({ ...a, source: "direct" }));
+        directData = fallback.data;
+        directError = fallback.error;
+      }
+
+      if (directError) throw new Error(safeMessage(directError, "Unable to load your job applications"));
+
+      const directJobIds = [...new Set((directData || []).map((a: any) => a.job_id).filter(Boolean))];
+      let { data: directJobs, error: directJobsError } = directJobIds.length
+        ? await supabase
+            .from("job_postings")
+            .select("id, title, job_type, company_name, company_city, company_location, deadline, duration, payment_amount, payment_currency")
+            .in("id", directJobIds)
+        : { data: [], error: null };
+
+      if (directJobsError && directJobIds.length) {
+        const fallback = await supabase
+          .from("job_postings")
+          .select("id, title, job_type, company_name")
+          .in("id", directJobIds);
+
+        directJobs = fallback.data;
+        directJobsError = fallback.error;
+      }
+
+      if (directJobsError) throw new Error(safeMessage(directJobsError, "Unable to load job posting details"));
+
+      const directJobMap = new Map((directJobs || []).map((job: any) => [job.id, job]));
+      const directApps = (directData || []).map((a: any) => ({
+        ...a,
+        rejection_reason: a.rejection_reason || null,
+        employer_feedback: a.employer_feedback || null,
+        student_level: a.student_level || null,
+        source: "direct",
+        job_postings: directJobMap.get(a.job_id) || {
+          title: "Job Posting",
+          job_type: "internship",
+          company_name: null,
+          company_city: null,
+          company_location: null,
+          deadline: null,
+          duration: null,
+          payment_amount: null,
+          payment_currency: null,
+        },
+      }));
 
       // Fetch IPN applications
-      const { data: ipnData, error: ipnError } = await supabase
+      let { data: ipnData, error: ipnError } = await supabase
         .from("ipn_applications")
         .select("id, opportunity_id, status, cover_letter, created_at, applicant_name, employer_feedback")
         .eq("applicant_id", user.id)
         .order("created_at", { ascending: false });
 
-      if (ipnError) throw ipnError;
+      if (ipnError) {
+        const fallback = await supabase
+          .from("ipn_applications")
+          .select("id, opportunity_id, status, cover_letter, created_at")
+          .eq("applicant_id", user.id)
+          .order("created_at", { ascending: false });
+
+        ipnData = fallback.data || [];
+        ipnError = fallback.error;
+      }
 
       // For IPN apps, fetch opportunity details
       const ipnApps: ApplicationWithJob[] = [];
-      for (const ipnApp of (ipnData || [])) {
-        const { data: opp } = await supabase
+      if (!ipnError) for (const ipnApp of (ipnData || [])) {
+        let { data: opp, error: oppError } = await supabase
           .from("ipn_opportunities")
           .select("title, job_type, location, duration, work_mode, company_id")
           .eq("id", ipnApp.opportunity_id)
           .maybeSingle();
+
+        if (oppError) {
+          const fallback = await supabase
+            .from("ipn_opportunities")
+            .select("title, job_type, location")
+            .eq("id", ipnApp.opportunity_id)
+            .maybeSingle();
+
+          opp = fallback.data;
+        }
 
         let companyName: string | null = null;
         if (opp?.company_id) {
@@ -116,7 +195,7 @@ export default function StudentJobBoard() {
         ipnApps.push({
           id: ipnApp.id,
           job_id: ipnApp.opportunity_id,
-          status: ipnApp.status,
+          status: ipnApp.status || "pending",
           rejection_reason: null,
           employer_feedback: (ipnApp as any).employer_feedback || null,
           cover_letter: ipnApp.cover_letter,

@@ -29,7 +29,7 @@ interface SupervisorRecord {
   department: string | null;
   academic_rank: string | null;
   staff_id: string | null;
-  verification_status: string;
+  verification_status: string | null;
   is_active: boolean;
   created_at: string;
   profile: {
@@ -122,6 +122,13 @@ export default function AdminSupervisors() {
         details: `Verified at ${new Date().toISOString()}`,
       });
 
+      await supabase.from("notifications").insert({
+        user_id: sup.user_id,
+        title: "Supervisor Account Verified",
+        message: "Your supervisor account has been verified and is now active.",
+        type: "success",
+      });
+
       toast({ title: "Supervisor Verified", description: `${sup.profile?.full_name} is now verified and active.` });
       fetchSupervisors();
     } else {
@@ -163,8 +170,9 @@ export default function AdminSupervisors() {
     setSelectedSupervisor(null);
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
+  const getStatusBadge = (status: string | null) => {
+    const normalizedStatus = status || "verified";
+    switch (normalizedStatus) {
       case "pending_verification":
         return <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/20"><Clock className="w-3 h-3 mr-1" />Pending</Badge>;
       case "verified":
@@ -172,12 +180,13 @@ export default function AdminSupervisors() {
       case "rejected":
         return <Badge className="bg-red-500/10 text-red-600 border-red-500/20"><XCircle className="w-3 h-3 mr-1" />Rejected</Badge>;
       default:
-        return <Badge variant="secondary">{status}</Badge>;
+        return <Badge variant="secondary">{normalizedStatus}</Badge>;
     }
   };
 
   const filtered = supervisors.filter((s) => {
-    const matchesTab = filterTab === "all" || s.verification_status === filterTab;
+    const status = s.verification_status || "verified";
+    const matchesTab = filterTab === "all" || status === filterTab;
     const matchesSearch =
       !searchQuery ||
       s.profile?.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -189,7 +198,7 @@ export default function AdminSupervisors() {
   const stats = {
     total: supervisors.length,
     pending: supervisors.filter((s) => s.verification_status === "pending_verification").length,
-    verified: supervisors.filter((s) => s.verification_status === "verified").length,
+    verified: supervisors.filter((s) => (s.verification_status || "verified") === "verified").length,
     rejected: supervisors.filter((s) => s.verification_status === "rejected").length,
   };
 

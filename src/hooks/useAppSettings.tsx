@@ -7,6 +7,8 @@ export interface AppSettings {
   support_email: string;
   ai_primary_provider: "openai" | "deepseek";
   ai_fallback_provider: "openai" | "deepseek";
+  openai_model: string;
+  deepseek_model: string;
   app_notifications: boolean;
   email_notifications: boolean;
   new_user_alerts: boolean;
@@ -23,6 +25,8 @@ const defaultSettings: Omit<AppSettings, 'loading' | 'refetch'> = {
   support_email: "",
   ai_primary_provider: "openai",
   ai_fallback_provider: "deepseek",
+  openai_model: "gpt-5.4-mini",
+  deepseek_model: "deepseek-v4-flash",
   app_notifications: true,
   email_notifications: true,
   new_user_alerts: true,
@@ -53,7 +57,7 @@ export function AppSettingsProvider({ children }: { children: ReactNode }) {
         const settingsObj: Omit<AppSettings, 'loading' | 'refetch'> = { ...defaultSettings };
         data.forEach((item) => {
           const key = item.key as keyof typeof settingsObj;
-          if (key === 'platform_name' || key === 'support_email' || key === 'platform_logo') {
+          if (key === 'platform_name' || key === 'support_email' || key === 'platform_logo' || key === 'openai_model' || key === 'deepseek_model') {
             (settingsObj as any)[key] = item.value || '';
           } else if (key === 'ai_primary_provider' || key === 'ai_fallback_provider') {
             if (item.value === 'openai' || item.value === 'deepseek') {

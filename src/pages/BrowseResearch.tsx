@@ -23,6 +23,30 @@ interface ResearchPaper {
   profiles?: { full_name: string } | null;
 }
 
+function toStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === "string");
+  }
+
+  if (typeof value !== "string" || value.trim() === "") {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((item): item is string => typeof item === "string");
+    }
+  } catch {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
 export default function BrowseResearch() {
   const [papers, setPapers] = useState<ResearchPaper[]>([]);
   const [filteredPapers, setFilteredPapers] = useState<ResearchPaper[]>([]);
@@ -54,8 +78,13 @@ export default function BrowseResearch() {
       .order('published_at', { ascending: false });
     
     if (data) {
-      setPapers(data);
-      setFilteredPapers(data);
+      const normalizedPapers = data.map((paper) => ({
+        ...paper,
+        keywords: toStringArray(paper.keywords),
+        author_names: toStringArray(paper.author_names),
+      }));
+      setPapers(normalizedPapers);
+      setFilteredPapers(normalizedPapers);
     }
     setLoading(false);
   };

@@ -19,6 +19,8 @@ interface PlatformSettings {
   ipn_activation_fee_ngn: string;
   ai_primary_provider: "openai" | "deepseek";
   ai_fallback_provider: "openai" | "deepseek";
+  openai_model: string;
+  deepseek_model: string;
   app_notifications: boolean;
   email_notifications: boolean;
   new_user_alerts: boolean;
@@ -35,6 +37,8 @@ const defaultSettings: PlatformSettings = {
   ipn_activation_fee_ngn: "5000",
   ai_primary_provider: "openai",
   ai_fallback_provider: "deepseek",
+  openai_model: "gpt-5.4-mini",
+  deepseek_model: "deepseek-v4-flash",
   app_notifications: true,
   email_notifications: true,
   new_user_alerts: true,
@@ -42,6 +46,20 @@ const defaultSettings: PlatformSettings = {
   require_email_verification: true,
   two_factor_auth: false,
 };
+
+const openAIModels = [
+  { value: "gpt-5.5", label: "GPT-5.5" },
+  { value: "gpt-5.4", label: "GPT-5.4" },
+  { value: "gpt-5.4-mini", label: "GPT-5.4 mini" },
+  { value: "gpt-5.4-nano", label: "GPT-5.4 nano" },
+];
+
+const deepSeekModels = [
+  { value: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
+  { value: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
+  { value: "deepseek-chat", label: "DeepSeek Chat (legacy)" },
+  { value: "deepseek-reasoner", label: "DeepSeek Reasoner (legacy)" },
+];
 
 export default function AdminSettings() {
   const [settings, setSettings] = useState<PlatformSettings>(defaultSettings);
@@ -68,7 +86,7 @@ export default function AdminSettings() {
         const settingsObj: PlatformSettings = { ...defaultSettings };
         data.forEach((item) => {
           const key = item.key;
-          if (key === 'platform_name' || key === 'support_email' || key === 'platform_logo' || key === 'download_credit_rate_ngn' || key === 'ipn_activation_fee_ngn') {
+          if (key === 'platform_name' || key === 'support_email' || key === 'platform_logo' || key === 'download_credit_rate_ngn' || key === 'ipn_activation_fee_ngn' || key === 'openai_model' || key === 'deepseek_model') {
             settingsObj[key] = item.value || '';
           } else if (key === 'ai_primary_provider' || key === 'ai_fallback_provider') {
             if (item.value === 'openai' || item.value === 'deepseek') {
@@ -394,6 +412,50 @@ export default function AdminSettings() {
                 </Select>
                 <p className="text-xs text-muted-foreground mt-1">
                   Used automatically when the primary provider fails or has no available credit.
+                </p>
+              </div>
+
+              <div>
+                <Label>OpenAI Model</Label>
+                <Select
+                  value={settings.openai_model}
+                  onValueChange={(value) => updateSetting('openai_model', value)}
+                >
+                  <SelectTrigger className="rounded-xl mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {openAIModels.map((model) => (
+                      <SelectItem key={model.value} value={model.value}>
+                        {model.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Model used whenever OpenAI is selected or used as fallback.
+                </p>
+              </div>
+
+              <div>
+                <Label>DeepSeek Model</Label>
+                <Select
+                  value={settings.deepseek_model}
+                  onValueChange={(value) => updateSetting('deepseek_model', value)}
+                >
+                  <SelectTrigger className="rounded-xl mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {deepSeekModels.map((model) => (
+                      <SelectItem key={model.value} value={model.value}>
+                        {model.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Model used whenever DeepSeek is selected or used as fallback.
                 </p>
               </div>
             </CardContent>
