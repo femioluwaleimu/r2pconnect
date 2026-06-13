@@ -1,0 +1,30 @@
+# Backend Environment
+.env
+.env.local
+
+# PHP Logs
+logs/
+*.log
+
+# Composer
+vendor/
+composer.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Uploads
+storage/uploads/*
+!storage/uploads/.gitkeep
+
+# Temporary
+tmp/
+temp/
+cache/

@@ -1,0 +1,85 @@
+project_id = "wdsbhnqoxptnggxsgmdp"
+
+[functions.track-research-view]
+verify_jwt = false
+
+[functions.ai-research]
+verify_jwt = false
+
+[functions.paystack]
+verify_jwt = false
+
+[functions.currency-convert]
+verify_jwt = false
+
+[functions.ai-match-challenge]
+verify_jwt = false
+
+[functions.ai-job-search]
+verify_jwt = false
+
+[functions.send-email]
+verify_jwt = false
+
+[functions.notify-research-match]
+verify_jwt = false
+
+[functions.ai-collab-matcher]
+verify_jwt = false
+
+[functions.ai-job-match]
+verify_jwt = false
+
+[functions.validate-institution-code]
+verify_jwt = false
+
+[functions.mark-code-used]
+verify_jwt = false
+
+[functions.forgot-password]
+verify_jwt = false
+
+[functions.send-verification-code]
+verify_jwt = false
+
+[functions.verify-code]
+verify_jwt = false
+
+[functions.reset-password]
+verify_jwt = false
+
+[functions.send-researcher-invite]
+verify_jwt = false
+
+[functions.research-integrity-check]
+verify_jwt = false
+
+[functions.track-documentary-view]
+verify_jwt = false
+
+[functions.subscription-cron]
+verify_jwt = false
+
+[functions.send-job-application-notification]
+verify_jwt = false
+
+[functions.send-collaboration-invite]
+verify_jwt = false
+
+[functions.ai-chapter-review]
+verify_jwt = false
+
+[functions.weekly-industry-reminder]
+verify_jwt = false
+
+[functions.weekly-researcher-digest]
+verify_jwt = false
+
+[functions.notify-similar-research]
+verify_jwt = false
+
+[functions.generate-sitemap]
+verify_jwt = false
+
+[functions.serve-sitemap]
+verify_jwt = false

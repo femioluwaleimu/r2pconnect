@@ -1,0 +1,657 @@
+{
+  "info": {
+    "name": "R2PConnect API",
+    "description": "Complete API collection for R2PConnect backend",
+    "version": "1.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Register",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"password123\",\n  \"first_name\": \"John\",\n  \"last_name\": \"Doe\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api.php?/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/auth/register",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api.php?/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/auth/login",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api.php?/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/auth/me",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api.php?/auth/logout",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/auth/logout",
+                  "value": null
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api.php?/users/profile",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/users/profile",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"John\",\n  \"last_name\": \"Doe\",\n  \"institution\": \"MIT\",\n  \"bio\": \"Researcher focused on AI\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api.php?/users/profile",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/users/profile",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Wallet",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api.php?/users/wallet",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/users/wallet",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Subscriptions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api.php?/users/subscriptions",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/users/subscriptions",
+                  "value": null
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Research Papers",
+      "item": [
+        {
+          "name": "Create Paper",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Study on AI Applications\",\n  \"abstract\": \"This research explores...\",\n  \"keywords\": [\"AI\", \"Machine Learning\"],\n  \"category\": \"Computer Science\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api.php?/research",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/research",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get My Papers",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api.php?/research/my-papers",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/research/my-papers",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Search Papers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api.php?/search?q=AI&category=Computer Science&limit=20",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/search",
+                  "value": null
+                },
+                {
+                  "key": "q",
+                  "value": "AI"
+                },
+                {
+                  "key": "category",
+                  "value": "Computer Science"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Trending Papers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api.php?/research/trending",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/research/trending",
+                  "value": null
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Challenges",
+      "item": [
+        {
+          "name": "List Challenges",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api.php?/challenges",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/challenges",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Challenge",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"AI Research Challenge 2026\",\n  \"description\": \"Submit your best AI research\",\n  \"prize\": 5000,\n  \"category\": \"AI\",\n  \"end_date\": \"2026-12-31 23:59:59\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api.php?/challenges",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/challenges",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Submit Entry",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"challenge_id\": \"uuid-here\",\n  \"submission_text\": \"My submission...\",\n  \"file_url\": \"https://example.com/file.pdf\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api.php?/challenges/{id}/submit",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/challenges/{id}/submit",
+                  "value": null
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Payments",
+      "item": [
+        {
+          "name": "Initiate Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 5000,\n  \"email\": \"user@example.com\",\n  \"reference\": \"ref_123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api.php?/payments/initiate",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/payments/initiate",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Payment History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api.php?/payments/history",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/payments/history",
+                  "value": null
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Analytics",
+      "item": [
+        {
+          "name": "User Analytics",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api.php?/analytics/user",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/analytics/user",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Platform Statistics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api.php?/analytics/platform",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/analytics/platform",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Popular Papers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api.php?/analytics/popular-papers?timeframe=30d&limit=10",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/analytics/popular-papers",
+                  "value": null
+                },
+                {
+                  "key": "timeframe",
+                  "value": "30d"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "Dashboard Overview",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api.php?/admin/dashboard",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/admin/dashboard",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get System Logs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api.php?/admin/logs?limit=100",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/admin/logs",
+                  "value": null
+                },
+                {
+                  "key": "limit",
+                  "value": "100"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Manage Users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api.php?/admin/users?limit=20&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api.php"],
+              "query": [
+                {
+                  "key": "/admin/users",
+                  "value": null
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "offset",
+                  "value": "0"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

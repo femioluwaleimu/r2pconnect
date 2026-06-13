@@ -1,0 +1,1 @@
+ALTER TABLE public.research_papers ADD COLUMN IF NOT EXISTS download_credit_cost integer NOT NULL DEFAULT 0;

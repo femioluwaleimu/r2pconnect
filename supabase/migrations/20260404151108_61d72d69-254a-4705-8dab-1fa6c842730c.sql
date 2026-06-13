@@ -1,0 +1,1 @@
+ALTER TABLE public.ipn_activations ADD COLUMN IF NOT EXISTS rejection_reason text;
