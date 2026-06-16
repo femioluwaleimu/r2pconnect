@@ -199,7 +199,8 @@ export default function SubscriptionSummary() {
         body: {
           action: isFreeActivation ? "activate_free_subscription" : "initialize",
           planId: plan.plan_id.replace("researcher_", ""),
-          couponId: appliedCoupon?.id || null
+          couponId: appliedCoupon?.id || null,
+          couponCode: appliedCoupon?.code || null,
         }
       });
 

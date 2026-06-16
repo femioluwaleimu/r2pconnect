@@ -32,7 +32,7 @@ interface Message {
   message: string;
   is_read: boolean;
   read_at: string | null;
-  created_at: string;
+  created_at: string | null;
   attachment_url: string | null;
   attachment_name: string | null;
   attachment_type: string | null;
@@ -44,6 +44,23 @@ interface StudentChatDrawerProps {
   studentName: string;
   studentAvatar: string | null;
 }
+
+const createMessageId = () => {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const databaseTimestamp = () => new Date().toISOString().slice(0, 19).replace("T", " ");
+
+const formatMessageDate = (date: string | null | undefined) => {
+  if (!date) return "Date unavailable";
+
+  const formatted = formatLagos(date, "datetime");
+  return formatted === "Unknown date" ? "Date unavailable" : formatted;
+};
 
 export default function StudentChatDrawer({
   supervisorId,
@@ -183,16 +200,21 @@ export default function StudentChatDrawer({
       }
 
       const { error } = await supabase.from("supervisor_student_messages").insert({
+        id: createMessageId(),
         supervisor_id: supervisorId,
         student_id: studentId,
         sender_id: supervisorId,
         message: newMessage.trim() || (attachmentData ? `📎 ${attachmentData.name}` : ""),
+        is_read: false,
+        created_at: databaseTimestamp(),
         attachment_url: attachmentData?.url || null,
         attachment_name: attachmentData?.name || null,
         attachment_type: attachmentData?.type || null,
       });
 
       if (error) throw error;
+
+      await fetchMessages();
 
       // Get student email and supervisor name for notification
       const { data: studentProfile } = await supabase
@@ -206,6 +228,21 @@ export default function StudentChatDrawer({
         .select("full_name")
         .eq("user_id", supervisorId)
         .maybeSingle();
+
+      try {
+        await supabase.from("notifications").insert({
+          id: createMessageId(),
+          user_id: studentId,
+          title: "New message from your supervisor",
+          message: newMessage.trim().substring(0, 150) || (attachmentData ? `Attachment: ${attachmentData.name}` : "You received an attachment."),
+          type: "message",
+          link: "/dashboard/supervisor-inbox",
+          is_read: false,
+          created_at: new Date().toISOString(),
+        });
+      } catch (notificationError) {
+        console.error("Error creating app notification:", notificationError);
+      }
 
       // Send email notification to student
       if (studentProfile?.email) {
@@ -343,7 +380,7 @@ export default function StudentChatDrawer({
                           }`}
                         >
                           <span className="text-[10px]">
-                            {formatLagos(msg.created_at, "datetime")}
+                            {formatMessageDate(msg.created_at)}
                           </span>
                           {isSupervisor && (
                             <MessageReadReceipt

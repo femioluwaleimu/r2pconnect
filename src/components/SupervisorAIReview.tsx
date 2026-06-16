@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { Sparkles, Loader2, AlertTriangle, CheckCircle, Lightbulb, Target, FileText, Brain, Copy, Send, Edit } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { AI_CREDIT_EXHAUSTED_MESSAGE, friendlyErrorMessage } from "@/lib/errorMessage";
 
 interface AIReviewResult {
   methodology_assessment: {
@@ -196,8 +197,8 @@ ${solutionApproach ? `Solution Approach: ${solutionApproach}` : ""}
         // Handle specific error types
         if (data.error === "AI_CREDITS_EXHAUSTED") {
           toast({ 
-            title: "AI Credits Exhausted", 
-            description: data.message || "You have used all your AI credits for this period.", 
+            title: "No AI Credits", 
+            description: AI_CREDIT_EXHAUSTED_MESSAGE, 
             variant: "destructive" 
           });
         } else if (data.error === "SUBSCRIPTION_EXPIRED") {
@@ -209,7 +210,7 @@ ${solutionApproach ? `Solution Approach: ${solutionApproach}` : ""}
         } else {
           toast({ 
             title: "AI Error", 
-            description: data.message || data.error, 
+            description: friendlyErrorMessage(data.message || data.error), 
             variant: "destructive" 
           });
         }

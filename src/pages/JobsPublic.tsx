@@ -23,6 +23,7 @@ import {
   ArrowRight,
   Users } from
 "lucide-react";
+import { formatAmount, formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 interface JobPosting {
   id: string;
@@ -113,7 +114,8 @@ export default function JobsPublic() {
           profile: profileData || undefined,
           source: "direct" as const,
           is_paid: (job as any).is_paid || false,
-          application_fee_ngn: (job as any).application_fee_ngn || 0,
+          application_fee_ngn: toNumber((job as any).application_fee_ngn),
+          payment_amount: job.payment_amount == null ? null : toNumber(job.payment_amount),
         };
       })
     );
@@ -139,7 +141,7 @@ export default function JobsPublic() {
       created_at: opp.created_at,
       source: "ipn" as const,
       is_paid: opp.is_paid,
-      application_fee_ngn: opp.application_fee_ngn,
+      application_fee_ngn: toNumber(opp.application_fee_ngn),
       work_mode: opp.work_mode || null,
     }));
 
@@ -274,12 +276,12 @@ export default function JobsPublic() {
                           </Badge>
                           {job.source === "ipn" && (
                             <Badge variant={job.is_paid ? "destructive" : "secondary"} className="rounded-full text-xs">
-                              {job.is_paid ? `₦${(job.application_fee_ngn || 0).toLocaleString()} Fee` : "Free"}
+                              {job.is_paid ? `${formatCurrencyAmount(job.application_fee_ngn)} Fee` : "Free"}
                             </Badge>
                           )}
                           {job.source === "direct" && job.is_paid && (
                             <Badge variant="destructive" className="rounded-full text-xs">
-                              ₦{(job.application_fee_ngn || 0).toLocaleString()} Fee
+                              {formatCurrencyAmount(job.application_fee_ngn)} Fee
                             </Badge>
                           )}
                         </div>
@@ -300,7 +302,7 @@ export default function JobsPublic() {
                       {job.payment_amount &&
                   <div className="flex items-center gap-1 text-green-600">
                           <DollarSign className="w-4 h-4" />
-                          <span>{job.payment_currency || '₦'}{job.payment_amount.toLocaleString()}</span>
+                          <span>{job.payment_currency || '₦'}{formatAmount(job.payment_amount)}</span>
                         </div>
                   }
                       {job.duration &&

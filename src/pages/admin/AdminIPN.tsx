@@ -9,6 +9,7 @@ import { Building2, Search, CheckCircle, Clock, XCircle, FileText, Eye, ShieldCh
 import { supabase } from "@/integrations/supabase/client";
 import { formatLagos } from "@/lib/dateUtils";
 import { useToast } from "@/hooks/use-toast";
+import { formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 import {
   Dialog,
   DialogContent,
@@ -71,7 +72,14 @@ export default function AdminIPN() {
           .select("email")
           .eq("user_id", p.user_id)
           .maybeSingle();
-        return { ...p, activation, email: profile?.email || "" };
+        return {
+          ...p,
+          activation: activation ? {
+            ...activation,
+            payment_amount: activation.payment_amount == null ? null : toNumber(activation.payment_amount),
+          } : null,
+          email: profile?.email || "",
+        };
       })
     );
 
@@ -211,7 +219,7 @@ export default function AdminIPN() {
                 </div>
                 <div>
                   <p className="text-2xl font-bold">
-                    ₦{ipnUsers.reduce((sum, u) => sum + Number(u.activation?.payment_amount || 0), 0).toLocaleString()}
+                    {formatCurrencyAmount(ipnUsers.reduce((sum, u) => sum + toNumber(u.activation?.payment_amount), 0))}
                   </p>
                   <p className="text-xs text-muted-foreground">Total Activation Revenue</p>
                 </div>
@@ -253,7 +261,7 @@ export default function AdminIPN() {
                     <div className="flex flex-wrap items-center gap-2">
                       {statusBadge(u.activation?.status)}
                       {u.activation?.payment_amount && Number(u.activation.payment_amount) > 0 && (
-                        <Badge variant="outline" className="rounded-full text-xs">₦{Number(u.activation.payment_amount).toLocaleString()}</Badge>
+                        <Badge variant="outline" className="rounded-full text-xs">{formatCurrencyAmount(u.activation.payment_amount)}</Badge>
                       )}
                       {u.activation?.id_document_url && (
                         <Button variant="ghost" size="sm" className="rounded-xl text-xs gap-1" onClick={() => viewDocument(u.activation!.id_document_url!)}>

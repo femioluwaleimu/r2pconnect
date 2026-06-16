@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,8 @@ import StyleMatchMeter from "@/components/ai-supervisor/StyleMatchMeter";
 import ExaminerReadinessLabel from "@/components/ai-supervisor/ExaminerReadinessLabel";
 import RevisionChecklist from "@/components/ai-supervisor/RevisionChecklist";
 import EthicsBanner from "@/components/ai-supervisor/EthicsBanner";
+import { AI_CREDIT_EXHAUSTED_MESSAGE, friendlyErrorMessage } from "@/lib/errorMessage";
+import { formatRating, toNumber } from "@/lib/numberFormat";
 import {
   Sparkles,
   BookOpen,
@@ -91,6 +93,95 @@ interface ChapterReview {
   encouragement_note?: string | null;
 }
 
+const friendlyAIUnavailableMessage = "Not Available, Please try again later, our team are working on this issue";
+
+const toStringArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.map(String).filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map(String).filter(Boolean);
+      }
+    } catch {
+      // Fall through to legacy comma-separated values.
+    }
+
+    return trimmed.split(",").map((item) => item.trim()).filter(Boolean);
+  }
+
+  return [];
+};
+
+const firstStringArray = (...values: unknown[]): string[] => {
+  for (const value of values) {
+    const items = toStringArray(value);
+    if (items.length > 0) {
+      return items;
+    }
+  }
+
+  return [];
+};
+
+const normalizeReview = (review: any): ChapterReview => {
+  const rating = toNumber(review?.rating);
+  const academicClarityScore = toNumber(review?.academic_clarity_score ?? review?.rating ?? 0);
+  const methodologyAlignment = toNumber(review?.methodology_alignment ?? review?.rating ?? 0);
+  const styleMatchScore = review?.style_match_score == null
+    ? Math.min(100, Math.max(0, Math.round(((rating + academicClarityScore + methodologyAlignment) / 15) * 100)))
+    : toNumber(review.style_match_score);
+
+  return {
+    ...review,
+    id: String(review?.id || ""),
+    chapter_name: String(review?.chapter_name || "Chapter"),
+    chapter_number: review?.chapter_number == null ? null : toNumber(review.chapter_number),
+    rating,
+    academic_clarity_score: academicClarityScore,
+    methodology_alignment: methodologyAlignment || null,
+    style_match_score: styleMatchScore,
+    ai_confidence_score: review?.ai_confidence_score == null ? null : toNumber(review.ai_confidence_score),
+    strengths: toStringArray(review?.strengths),
+    weak_areas: toStringArray(review?.weak_areas),
+    recommendations: toStringArray(review?.recommendations),
+    required_fixes: toStringArray(review?.required_fixes),
+    optional_improvements: toStringArray(review?.optional_improvements),
+    what_to_change: toStringArray(review?.what_to_change),
+    why_it_matters: firstStringArray(
+      review?.why_it_matters,
+      review?.why_it_matters_academically,
+      review?.academic_importance,
+      review?.why_it_matters_academic
+    ),
+    examiner_expectations: firstStringArray(
+      review?.examiner_expectations,
+      review?.what_examiners_expect,
+      review?.examiner_expectations_list,
+      review?.what_examiner_expects
+    ),
+    generic_examples: firstStringArray(
+      review?.generic_examples,
+      review?.examples,
+      review?.generic_rewrite_examples
+    ),
+    academic_level_feedback: toStringArray(review?.academic_level_feedback),
+    purpose_based_recommendations: toStringArray(review?.purpose_based_recommendations),
+    suggested_improvements: toStringArray(review?.suggested_improvements),
+    risk_gap_identification: toStringArray(review?.risk_gap_identification),
+    priority_fix_list: toStringArray(review?.priority_fix_list),
+    next_action_steps: toStringArray(review?.next_action_steps),
+    summary: String(review?.summary || "No summary was returned for this review."),
+    created_at: String(review?.created_at || new Date().toISOString()),
+  };
+};
+
 interface ChapterReviewPanelProps {
   researchId: string;
   researchStatus: string;
@@ -128,6 +219,7 @@ export default function ChapterReviewPanel({
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [reviewMode, setReviewMode] = useState<"quick" | "learning" | "advanced">("quick");
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
+  const fullscreenContentRef = useRef<HTMLDivElement | null>(null);
   const { toast } = useToast();
   const { creditsRemaining, refresh: refetchCredits } = useAICredits();
 
@@ -140,18 +232,39 @@ export default function ChapterReviewPanel({
     fetchReviews();
   }, [researchId]);
 
+  useEffect(() => {
+    if (fullscreenOpen) {
+      requestAnimationFrame(() => {
+        fullscreenContentRef.current?.scrollTo({ top: 0 });
+      });
+    }
+  }, [fullscreenOpen, selectedReview?.id]);
+
   const fetchReviews = async () => {
     try {
       const { data, error } = await supabase
         .from("research_chapter_reviews")
         .select("*")
         .eq("research_id", researchId)
-        .order("chapter_number", { ascending: true });
+        .order("created_at", { ascending: false });
 
       if (error) throw error;
-      setReviews((data as ChapterReview[]) || []);
+      const normalizedReviews = ((data as ChapterReview[]) || []).map(normalizeReview);
+      const latestByChapter = new Map<string, ChapterReview>();
+      normalizedReviews.forEach((review) => {
+        if (!latestByChapter.has(review.chapter_name)) {
+          latestByChapter.set(review.chapter_name, review);
+        }
+      });
+      const latestReviews = Array.from(latestByChapter.values()).sort((a, b) => {
+        const chapterA = a.chapter_number ?? Number.MAX_SAFE_INTEGER;
+        const chapterB = b.chapter_number ?? Number.MAX_SAFE_INTEGER;
+        if (chapterA !== chapterB) return chapterA - chapterB;
+        return a.chapter_name.localeCompare(b.chapter_name);
+      });
+      setReviews(latestReviews);
 
-      const reviewedChapters = (data || []).map((r: ChapterReview) => r.chapter_name);
+      const reviewedChapters = latestReviews.map((r) => r.chapter_name);
       const allChapters = [...new Set([...DEFAULT_CHAPTERS, ...reviewedChapters])];
       setChapters(allChapters);
     } catch (error: any) {
@@ -247,7 +360,7 @@ export default function ChapterReviewPanel({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) throw new Error("Not authenticated");
 
-      const { data: result, error } = await supabase.functions.invoke("ai-chapter-review", {
+      const response = await supabase.functions.invoke("ai-chapter-review", {
         body: {
           research_id: researchId,
           chapter_name: chapterName,
@@ -257,11 +370,14 @@ export default function ChapterReviewPanel({
         },
       });
 
+      const result = (response as any)?.data ?? response;
+      const error = (response as any)?.error ?? null;
+
       if (error) {
         if ((error as any).error === "AI_CREDITS_EXHAUSTED") {
           toast({
             title: "No AI Credits",
-            description: (error as any).message || "Please upgrade your plan for more credits.",
+            description: AI_CREDIT_EXHAUSTED_MESSAGE,
             variant: "destructive",
           });
         } else {
@@ -270,26 +386,32 @@ export default function ChapterReviewPanel({
         return;
       }
 
-      const readinessLabel = result.review.examiner_readiness === "supervisor_ready" 
+      if (result?.error || !result?.review) {
+        const message = typeof result?.error === "string" ? friendlyErrorMessage(result.message || result.error) : friendlyAIUnavailableMessage;
+        throw new Error(message || friendlyAIUnavailableMessage);
+      }
+
+      const review = normalizeReview(result.review);
+      const readinessLabel = review.examiner_readiness === "supervisor_ready" 
         ? "Supervisor-Ready!" 
-        : result.review.examiner_readiness === "needs_revision" 
+        : review.examiner_readiness === "needs_revision" 
         ? "Needs some revision" 
         : "Needs work";
 
       toast({
         title: "Chapter analyzed!",
-        description: `${chapterName}: ${result.review.rating}/5 - ${readinessLabel}`,
+        description: `${chapterName}: ${formatRating(review.rating)}/5 - ${readinessLabel}`,
       });
 
       refetchCredits();
       fetchReviews();
-      setSelectedReview(result.review);
+      setSelectedReview(review);
       setCustomChapterOpen(false);
       setCustomChapter({ name: "", content: "" });
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.message,
+        description: error.message || friendlyAIUnavailableMessage,
         variant: "destructive",
       });
     } finally {
@@ -432,7 +554,7 @@ works has been used or shown.
   };
 
   const averageRating = reviews.length > 0
-    ? (reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length).toFixed(1)
+    ? formatRating(reviews.reduce((sum, r) => sum + r.rating, 0) / reviews.length)
     : null;
 
   const supervisorReadyCount = reviews.filter(r => r.examiner_readiness === "supervisor_ready").length;
@@ -647,7 +769,7 @@ works has been used or shown.
           </div>
 
           {/* Review Details */}
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-3 min-h-0">
             {selectedReview ? (
               <ReviewDetails
                 review={selectedReview}
@@ -681,7 +803,7 @@ works has been used or shown.
               {selectedReview ? selectedReview.chapter_name : "Review"} — Full Scan
             </DialogTitle>
           </DialogHeader>
-          <div className="flex-1 min-h-0">
+          <div ref={fullscreenContentRef} className="flex-1 min-h-0 overflow-y-auto">
             {selectedReview && (
               <ReviewDetails
                 review={selectedReview}
@@ -768,7 +890,7 @@ function ChapterListItem({
           {review && (
             <Badge className={`${getRatingBadgeClass(review.rating)} flex-shrink-0`}>
               <Star className="w-3 h-3 mr-1 fill-current" />
-              {review.rating}
+              {formatRating(review.rating)}
             </Badge>
           )}
         </div>
@@ -936,8 +1058,8 @@ function ReviewDetails({ review, onCopy, onDownload, onFullscreen, getRatingColo
     : "Quick Review";
 
   const containerClass = variant === "fullscreen"
-    ? "h-full overflow-y-auto"
-    : "h-auto max-h-[80vh] lg:max-h-[500px] overflow-y-auto";
+    ? "h-auto overflow-visible"
+    : "max-h-[calc(100vh-180px)] overflow-y-auto overscroll-contain";
 
   return (
     <div className={containerClass}>
@@ -1002,20 +1124,20 @@ function ReviewDetails({ review, onCopy, onDownload, onFullscreen, getRatingColo
         <div className="grid grid-cols-3 gap-3">
           <div className="p-3 rounded-lg bg-muted/50 text-center">
             <div className={`text-2xl font-bold ${getRatingColor(review.rating)}`}>
-              {review.rating}
+              {formatRating(review.rating)}
             </div>
             <div className="text-xs text-muted-foreground">Overall</div>
           </div>
           <div className="p-3 rounded-lg bg-muted/50 text-center">
             <div className={`text-2xl font-bold ${getRatingColor(review.academic_clarity_score)}`}>
-              {review.academic_clarity_score}
+              {formatRating(review.academic_clarity_score)}
             </div>
             <div className="text-xs text-muted-foreground">Clarity</div>
           </div>
           {review.methodology_alignment && (
             <div className="p-3 rounded-lg bg-muted/50 text-center">
               <div className={`text-2xl font-bold ${getRatingColor(review.methodology_alignment)}`}>
-                {review.methodology_alignment}
+                {formatRating(review.methodology_alignment)}
               </div>
               <div className="text-xs text-muted-foreground">Methodology</div>
             </div>
@@ -1119,8 +1241,8 @@ function ReviewDetails({ review, onCopy, onDownload, onFullscreen, getRatingColo
           </div>
         ) : null}
 
-        {/* Learning Mode Extra Content */}
-        {review.review_mode === "learning" && (
+        {/* Academic guidance sections */}
+        {(review.why_it_matters?.length || review.examiner_expectations?.length || review.generic_examples?.length) ? (
           <>
             {review.why_it_matters?.length ? (
               <div className="space-y-2">
@@ -1167,7 +1289,7 @@ function ReviewDetails({ review, onCopy, onDownload, onFullscreen, getRatingColo
               </div>
             ) : null}
           </>
-        )}
+        ) : null}
 
         {/* Advanced Mode Deep Sections */}
         {isAdvanced && (
@@ -1220,7 +1342,7 @@ function ReviewDetails({ review, onCopy, onDownload, onFullscreen, getRatingColo
                 </h4>
                 {typeof review.ai_confidence_score === "number" && (
                   <>
-                    <div className="text-3xl font-bold text-primary">{review.ai_confidence_score}/100</div>
+                    <div className="text-3xl font-bold text-primary">{formatRating(review.ai_confidence_score)}/100</div>
                     <Progress value={review.ai_confidence_score} className="h-2" />
                   </>
                 )}

@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Briefcase, Users, Calendar, Building2, GraduationCap, Trash2, Edit, Eye, ToggleLeft, ToggleRight, Loader2 } from "lucide-react";
 import { formatLagos } from "@/lib/dateUtils";
+import { formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 interface Institution {
   id: string;
@@ -131,7 +132,10 @@ export default function IndustryJobPostings() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setJobPostings(data || []);
+      setJobPostings((data || []).map((job) => ({
+        ...job,
+        payment_amount: job.payment_amount == null ? null : toNumber(job.payment_amount),
+      })));
     } catch (error: any) {
       toast({ title: "Error fetching jobs", description: error.message, variant: "destructive" });
     } finally {
@@ -555,7 +559,7 @@ export default function IndustryJobPostings() {
                       </span>
                     )}
                     {job.payment_amount && (
-                      <span className="text-emerald-600 font-medium">₦{job.payment_amount.toLocaleString()}</span>
+                      <span className="text-emerald-600 font-medium">{formatCurrencyAmount(job.payment_amount)}</span>
                     )}
                     <span className="text-muted-foreground">{job.slots_filled}/{job.slots_available} hired</span>
                     {job.deadline && (

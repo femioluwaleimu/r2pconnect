@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Sparkles, Users, Loader2, RefreshCw, Lightbulb, ChevronRight, GraduationCap, Send, BookOpen } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { AI_CREDIT_EXHAUSTED_MESSAGE, friendlyErrorMessage } from "@/lib/errorMessage";
 
 interface ResearcherMatch {
   userId: string;
@@ -45,8 +46,8 @@ export default function CollabMatcher() {
       if (error) {
         if (error.message?.includes('AI_CREDITS_EXHAUSTED') || error.message?.includes('429')) {
           toast({
-            title: "AI Credits Exhausted",
-            description: "You have used all your AI credits for this month. Upgrade your subscription for more credits.",
+            title: "No AI Credits",
+            description: AI_CREDIT_EXHAUSTED_MESSAGE,
             variant: "destructive",
           });
           return;
@@ -68,7 +69,7 @@ export default function CollabMatcher() {
       console.error('Error finding matches:', error);
       toast({
         title: "Error",
-        description: error.message || "Failed to find researcher matches",
+        description: friendlyErrorMessage(error.message, "Failed to find researcher matches"),
         variant: "destructive",
       });
     } finally {

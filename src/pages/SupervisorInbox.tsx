@@ -42,7 +42,7 @@ interface Message {
   message: string;
   is_read: boolean;
   read_at: string | null;
-  created_at: string;
+  created_at: string | null;
   attachment_url: string | null;
   attachment_name: string | null;
   attachment_type: string | null;
@@ -53,6 +53,23 @@ interface Conversation {
   lastMessage: Message | null;
   unreadCount: number;
 }
+
+const createId = () => {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+};
+
+const databaseTimestamp = () => new Date().toISOString().slice(0, 19).replace("T", " ");
+
+const formatMessageDate = (date: string | null | undefined) => {
+  if (!date) return "Date unavailable";
+
+  const formatted = formatLagos(date, "datetime");
+  return formatted === "Unknown date" ? "Date unavailable" : formatted;
+};
 
 export default function SupervisorInbox() {
   const [user, setUser] = useState<User | null>(null);
@@ -253,9 +270,12 @@ export default function SupervisorInbox() {
       }
 
       const { error } = await supabase.from("supervisor_student_messages").insert({
+        id: createId(),
         supervisor_id: selectedConversation.supervisor.user_id,
         student_id: user.id,
         sender_id: user.id,
+        is_read: false,
+        created_at: databaseTimestamp(),
         message: newMessage.trim() || (attachmentData ? `📎 ${attachmentData.name}` : ""),
         attachment_url: attachmentData?.url || null,
         attachment_name: attachmentData?.name || null,
@@ -263,6 +283,54 @@ export default function SupervisorInbox() {
       });
 
       if (error) throw error;
+
+      await fetchMessages(selectedConversation.supervisor.user_id);
+      await fetchConversations(user.id);
+
+      const messagePreview =
+        newMessage.trim().substring(0, 150) ||
+        (attachmentData ? `Attachment: ${attachmentData.name}` : "You received an attachment.");
+
+      try {
+        await supabase.from("notifications").insert({
+          id: createId(),
+          user_id: selectedConversation.supervisor.user_id,
+          title: "New message from a student",
+          message: `${studentName}: ${messagePreview}`,
+          type: "message",
+          link: `/supervisor/students/${user.id}`,
+          is_read: false,
+          created_at: new Date().toISOString(),
+        });
+      } catch (notificationError) {
+        console.error("Error creating supervisor app notification:", notificationError);
+      }
+
+      try {
+        const { data: supervisorProfile } = await supabase
+          .from("profiles")
+          .select("email, full_name")
+          .eq("user_id", selectedConversation.supervisor.user_id)
+          .maybeSingle();
+
+        if (supervisorProfile?.email) {
+          await supabase.functions.invoke("send-email", {
+            body: {
+              type: "student_message",
+              to: supervisorProfile.email,
+              data: {
+                supervisorName: supervisorProfile.full_name || selectedConversation.supervisor.full_name || "Supervisor",
+                studentName,
+                messagePreview: messagePreview + (newMessage.length > 150 ? "..." : ""),
+                studentId: user.id,
+              },
+            },
+          });
+        }
+      } catch (emailError) {
+        console.error("Error sending supervisor email notification:", emailError);
+      }
+
       setNewMessage("");
       setSelectedFile(null);
     } catch (error: any) {
@@ -498,7 +566,7 @@ export default function SupervisorInbox() {
                                       : "text-muted-foreground"
                                   }`}
                                 >
-                                  {formatLagos(msg.created_at, "datetime")}
+                                  {formatMessageDate(msg.created_at)}
                                 </p>
                               </div>
                             </div>

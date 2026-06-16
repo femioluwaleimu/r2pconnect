@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { User as UserIcon, Mail, Camera, Shield, Info, Briefcase } from "lucide-react";
+import { prepareAvatarImage } from "@/lib/avatarImage";
 
 export default function InvestorProfile() {
   const [user, setUser] = useState<User | null>(null);
@@ -43,6 +44,39 @@ export default function InvestorProfile() {
       toast({ title: "Profile updated successfully" });
     } catch (error: any) {
       toast({ title: "Error updating profile", description: error.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+
+    setLoading(true);
+    try {
+      const avatarFile = await prepareAvatarImage(file);
+      const filePath = `${user.id}/avatar.jpg`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("avatars")
+        .upload(filePath, avatarFile, { upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage.from("avatars").getPublicUrl(filePath);
+      const newAvatarUrl = `${publicUrl}?t=${Date.now()}`;
+      setAvatarUrl(newAvatarUrl);
+
+      await supabase.auth.updateUser({
+        data: { full_name: fullName, investment_focus: investmentFocus, avatar_url: newAvatarUrl }
+      });
+
+      await supabase.from("profiles").update({ avatar_url: newAvatarUrl }).eq("user_id", user.id);
+
+      toast({ title: "Avatar uploaded successfully" });
+    } catch (error: any) {
+      toast({ title: "Error uploading avatar", description: error.message, variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -95,10 +129,19 @@ export default function InvestorProfile() {
                   )}
                 </div>
                 <div className="space-y-2">
-                  <Button variant="outline" className="rounded-xl">
-                    Upload Photo
-                  </Button>
-                  <p className="text-xs text-muted-foreground">JPG, PNG up to 5MB</p>
+                  <Label htmlFor="investor-avatar" className="cursor-pointer">
+                    <Button variant="outline" className="rounded-xl" asChild disabled={loading}>
+                      <span>{loading ? "Uploading..." : "Upload Photo"}</span>
+                    </Button>
+                  </Label>
+                  <Input
+                    id="investor-avatar"
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleAvatarUpload}
+                  />
+                  <p className="text-xs text-muted-foreground">Auto-cropped square, compressed to 50KB</p>
                 </div>
               </div>
             </CardContent>

@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS user_roles (
     user_id CHAR(36) NOT NULL UNIQUE,
     role ENUM('admin', 'researcher', 'supervisor', 'industry', 'reviewer', 'ipn_user') NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_role (role)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci; 
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS verification_codes (
     used BOOLEAN DEFAULT FALSE,
     expires_at TIMESTAMP NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_email_code (email, code, type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -124,6 +126,7 @@ CREATE TABLE IF NOT EXISTS institution_verification_codes (
     verification_code VARCHAR(50) NOT NULL UNIQUE,
     used_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (institution_id) REFERENCES institutions(id) ON DELETE CASCADE,
     INDEX idx_code (verification_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -150,6 +153,40 @@ CREATE TABLE IF NOT EXISTS supervisors (
     FOREIGN KEY (department_id) REFERENCES departments(id) ON DELETE SET NULL,
     INDEX idx_institution (institution_id),
     INDEX idx_active (is_active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- External supervisor invites
+CREATE TABLE IF NOT EXISTS external_supervisor_invites (
+    id CHAR(36) PRIMARY KEY COMMENT 'UUID',
+    student_id CHAR(36) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    full_name VARCHAR(255) NOT NULL,
+    department VARCHAR(255) NULL,
+    institution_name VARCHAR(255) NULL,
+    invite_code VARCHAR(50) NOT NULL UNIQUE,
+    status ENUM('pending', 'accepted', 'cancelled', 'expired') DEFAULT 'pending',
+    accepted_at TIMESTAMP NULL,
+    expires_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_student (student_id),
+    INDEX idx_email (email),
+    INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Student AI style reference metadata
+CREATE TABLE IF NOT EXISTS student_style_references (
+    id CHAR(36) PRIMARY KEY COMMENT 'UUID',
+    user_id CHAR(36) NOT NULL,
+    file_name VARCHAR(255) NOT NULL,
+    file_size BIGINT NULL,
+    source_description TEXT NULL,
+    declaration_accepted BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Research Papers
@@ -239,8 +276,26 @@ CREATE TABLE IF NOT EXISTS ai_credits (
     reset_date DATE,
     reset_month VARCHAR(7) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Saved AI Responses
+CREATE TABLE IF NOT EXISTS ai_saved_responses (
+    id CHAR(36) PRIMARY KEY COMMENT 'UUID',
+    user_id CHAR(36) NOT NULL,
+    tool_type VARCHAR(100) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    prompt LONGTEXT NULL,
+    response LONGTEXT NOT NULL,
+    metadata JSON NULL,
+    tier_at_save VARCHAR(100) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user_created (user_id, created_at),
+    INDEX idx_tool_type (tool_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Subscriptions
@@ -324,10 +379,42 @@ CREATE TABLE IF NOT EXISTS coupon_usages (
     final_amount DECIMAL(15,2) NOT NULL,
     activation_month DATE,
     used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (coupon_id) REFERENCES coupon_codes(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
     INDEX idx_user_coupon (user_id, coupon_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Referral Codes
+CREATE TABLE IF NOT EXISTS referral_codes (
+    id CHAR(36) PRIMARY KEY COMMENT 'UUID',
+    user_id CHAR(36) NOT NULL,
+    code VARCHAR(50) NOT NULL UNIQUE,
+    total_referrals INT DEFAULT 0,
+    credits_earned INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_user (user_id),
+    INDEX idx_code (code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Referral Usages
+CREATE TABLE IF NOT EXISTS referral_usages (
+    id CHAR(36) PRIMARY KEY COMMENT 'UUID',
+    referral_code_id CHAR(36) NOT NULL,
+    referrer_id CHAR(36) NOT NULL,
+    referred_user_id CHAR(36) NOT NULL UNIQUE,
+    credits_awarded INT DEFAULT 0,
+    referred_credits_awarded INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (referral_code_id) REFERENCES referral_codes(id) ON DELETE CASCADE,
+    FOREIGN KEY (referrer_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (referred_user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_referrer (referrer_id),
+    INDEX idx_referred (referred_user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Payment History
@@ -344,6 +431,7 @@ CREATE TABLE IF NOT EXISTS payment_history (
     coupon_code VARCHAR(50) NULL,
     discount_amount DECIMAL(15,2) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_user (user_id),
     INDEX idx_reference (reference),
     INDEX idx_status (status)
@@ -415,10 +503,31 @@ CREATE TABLE IF NOT EXISTS wallet_transactions (
     status ENUM('pending', 'completed', 'failed', 'cancelled') DEFAULT 'pending',
     metadata JSON NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user (user_id),
     INDEX idx_reference (reference),
     INDEX idx_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Commission Earnings
+CREATE TABLE IF NOT EXISTS commission_earnings (
+    id CHAR(36) PRIMARY KEY COMMENT 'UUID',
+    beneficiary_id CHAR(36) NOT NULL,
+    beneficiary_type VARCHAR(50) NOT NULL COMMENT 'supervisor, referrer, download_supervisor, etc.',
+    student_id CHAR(36) NOT NULL,
+    subscription_id CHAR(36) NULL,
+    amount DECIMAL(15,2) NOT NULL DEFAULT 0,
+    commission_rate DECIMAL(5,2) NOT NULL DEFAULT 0,
+    currency VARCHAR(10) DEFAULT 'NGN',
+    status VARCHAR(50) DEFAULT 'completed',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (beneficiary_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (student_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE SET NULL,
+    INDEX idx_beneficiary (beneficiary_id),
+    INDEX idx_student (student_id),
+    INDEX idx_subscription (subscription_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Job Postings
@@ -494,6 +603,7 @@ CREATE TABLE IF NOT EXISTS job_feedback_messages (
     message LONGTEXT NOT NULL,
     is_read BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (application_id) REFERENCES job_applications(id) ON DELETE CASCADE,
     FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_application (application_id)
@@ -511,6 +621,7 @@ CREATE TABLE IF NOT EXISTS industry_job_payments (
     paystack_reference VARCHAR(255) NULL,
     status ENUM('pending', 'success', 'failed') DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (job_id) REFERENCES job_postings(id) ON DELETE CASCADE,
     FOREIGN KEY (applicant_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (application_id) REFERENCES job_applications(id) ON DELETE SET NULL,
@@ -591,6 +702,7 @@ CREATE TABLE IF NOT EXISTS notifications (
     is_read BOOLEAN DEFAULT FALSE,
     read_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user (user_id),
     INDEX idx_read (is_read)
@@ -603,6 +715,7 @@ CREATE TABLE IF NOT EXISTS platform_settings (
     value TEXT NULL,
     type VARCHAR(50) NULL COMMENT 'string, integer, json, boolean',
     updated_by CHAR(36) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_key (key)
@@ -616,11 +729,17 @@ CREATE TABLE IF NOT EXISTS research_chapter_reviews (
     chapter_name VARCHAR(255) NOT NULL,
     chapter_number INT NULL,
     rating INT NULL COMMENT '1-5 stars',
+    academic_clarity_score INT NULL COMMENT '1-5 stars',
     summary LONGTEXT NULL,
     strengths JSON NULL,
     weak_areas JSON NULL,
+    recommendations JSON NULL,
     required_fixes JSON NULL,
     optional_improvements JSON NULL,
+    examiner_readiness VARCHAR(50) NULL COMMENT 'not_ready, needs_revision, supervisor_ready',
+    why_it_matters JSON NULL,
+    examiner_expectations JSON NULL,
+    generic_examples JSON NULL,
     methodology_alignment INT NULL,
     style_match_score INT NULL,
     ai_confidence_score INT NULL,
@@ -631,6 +750,24 @@ CREATE TABLE IF NOT EXISTS research_chapter_reviews (
     FOREIGN KEY (research_id) REFERENCES research_papers(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_research (research_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Chapter Review Comments
+CREATE TABLE IF NOT EXISTS chapter_review_comments (
+    id CHAR(36) PRIMARY KEY COMMENT 'UUID',
+    research_id CHAR(36) NOT NULL,
+    review_id CHAR(36) NOT NULL,
+    user_id CHAR(36) NOT NULL,
+    author_role VARCHAR(50) NOT NULL COMMENT 'student, supervisor, admin',
+    comment LONGTEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (research_id) REFERENCES research_papers(id) ON DELETE CASCADE,
+    FOREIGN KEY (review_id) REFERENCES research_chapter_reviews(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_research (research_id),
+    INDEX idx_review (review_id),
+    INDEX idx_created (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Documentaries
@@ -690,6 +827,7 @@ CREATE TABLE IF NOT EXISTS collaboration_messages (
     is_read BOOLEAN DEFAULT FALSE,
     read_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (collaboration_id) REFERENCES researcher_collaborations(id) ON DELETE CASCADE,
     FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_collaboration (collaboration_id)
@@ -702,6 +840,7 @@ CREATE TABLE IF NOT EXISTS supervisor_ai_credits (
     credits_limit INT DEFAULT 10,
     credits_remaining INT DEFAULT 10,
     last_reset_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (supervisor_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -799,6 +938,7 @@ CREATE TABLE IF NOT EXISTS ipn_payments (
     paystack_reference VARCHAR(255) NULL,
     status ENUM('pending', 'success', 'failed') DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (opportunity_id) REFERENCES ipn_opportunities(id) ON DELETE CASCADE,
     FOREIGN KEY (applicant_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (application_id) REFERENCES ipn_applications(id) ON DELETE SET NULL,
@@ -897,9 +1037,26 @@ CREATE TABLE IF NOT EXISTS credit_topup_purchases (
     reference VARCHAR(255) NULL,
     status VARCHAR(50) DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (package_id) REFERENCES credit_topup_packages(id) ON DELETE SET NULL,
     INDEX idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Frequently Asked Questions
+CREATE TABLE IF NOT EXISTS faq (
+    id CHAR(36) PRIMARY KEY COMMENT 'UUID',
+    question VARCHAR(500) NOT NULL,
+    answer LONGTEXT NOT NULL,
+    category VARCHAR(100) DEFAULT 'general',
+    display_location VARCHAR(100) DEFAULT 'full_page',
+    is_active BOOLEAN DEFAULT TRUE,
+    sort_order INT DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_category (category),
+    INDEX idx_active (is_active),
+    INDEX idx_sort_order (sort_order)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Compatibility tables used by the PHP API layer
@@ -966,6 +1123,7 @@ CREATE TABLE IF NOT EXISTS research_views (
     research_id CHAR(36) NOT NULL,
     user_id CHAR(36) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (research_id) REFERENCES research_papers(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_research (research_id),
@@ -977,6 +1135,7 @@ CREATE TABLE IF NOT EXISTS research_downloads (
     research_id CHAR(36) NOT NULL,
     user_id CHAR(36) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (research_id) REFERENCES research_papers(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
     INDEX idx_research (research_id),
@@ -1003,6 +1162,7 @@ CREATE TABLE IF NOT EXISTS messages (
     is_read BOOLEAN DEFAULT FALSE,
     read_at TIMESTAMP NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (sender_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (recipient_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_sender_recipient (sender_id, recipient_id),
@@ -1028,6 +1188,8 @@ CREATE TABLE IF NOT EXISTS collaboration_members (
     user_id CHAR(36) NOT NULL,
     role ENUM('creator', 'admin', 'member') DEFAULT 'member',
     joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (collaboration_id) REFERENCES collaborations(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     UNIQUE KEY uniq_collaboration_user (collaboration_id, user_id)
@@ -1053,6 +1215,7 @@ CREATE TABLE IF NOT EXISTS challenge_votes (
     submission_id CHAR(36) NOT NULL,
     user_id CHAR(36) NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (challenge_id) REFERENCES challenges(id) ON DELETE CASCADE,
     FOREIGN KEY (submission_id) REFERENCES challenge_submissions(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -1066,6 +1229,7 @@ CREATE TABLE IF NOT EXISTS ai_reviews (
     review_text LONGTEXT NULL,
     score DECIMAL(5,2) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (research_id) REFERENCES research_papers(id) ON DELETE CASCADE,
     INDEX idx_research (research_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -1077,6 +1241,7 @@ CREATE TABLE IF NOT EXISTS plagiarism_checks (
     matches JSON NULL,
     status VARCHAR(50) DEFAULT 'completed',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (research_id) REFERENCES research_papers(id) ON DELETE CASCADE,
     INDEX idx_research_created (research_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -1103,6 +1268,7 @@ CREATE TABLE IF NOT EXISTS supervisor_reviews (
     rating INT NULL,
     review_text LONGTEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (research_id) REFERENCES research_papers(id) ON DELETE CASCADE,
     FOREIGN KEY (supervisor_id) REFERENCES users(id) ON DELETE CASCADE,
     FOREIGN KEY (author_id) REFERENCES users(id) ON DELETE SET NULL,
@@ -1115,6 +1281,7 @@ CREATE TABLE IF NOT EXISTS supervisor_assignments (
     supervisor_id CHAR(36) NOT NULL,
     status VARCHAR(50) DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (research_id) REFERENCES research_papers(id) ON DELETE CASCADE,
     FOREIGN KEY (supervisor_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_research (research_id),
@@ -1126,6 +1293,7 @@ CREATE TABLE IF NOT EXISTS content_flags (
     research_id CHAR(36) NOT NULL,
     reason LONGTEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (research_id) REFERENCES research_papers(id) ON DELETE CASCADE,
     INDEX idx_research (research_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -1135,6 +1303,7 @@ CREATE TABLE IF NOT EXISTS password_resets (
     user_id CHAR(36) NOT NULL,
     token TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
     INDEX idx_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

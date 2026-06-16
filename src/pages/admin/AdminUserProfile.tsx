@@ -46,7 +46,7 @@ interface UserProfile {
 }
 
 export default function AdminUserProfile() {
-  const { userId } = useParams<{ userId: string }>();
+  const { id: userId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,6 +54,8 @@ export default function AdminUserProfile() {
   useEffect(() => {
     if (userId) {
       fetchUserProfile(userId);
+    } else {
+      setLoading(false);
     }
   }, [userId]);
 
@@ -64,16 +66,20 @@ export default function AdminUserProfile() {
         .from('profiles')
         .select('*')
         .eq('user_id', id)
-        .single();
+        .maybeSingle();
 
       if (profileError) throw profileError;
+      if (!profileData) {
+        setProfile(null);
+        return;
+      }
 
       // Fetch role
       const { data: roleData } = await supabase
         .from('user_roles')
         .select('role')
         .eq('user_id', id)
-        .single();
+        .maybeSingle();
 
       // Fetch institution name if applicable
       let institutionName = null;
@@ -82,7 +88,7 @@ export default function AdminUserProfile() {
           .from('institutions')
           .select('name')
           .eq('id', profileData.institution_id)
-          .single();
+          .maybeSingle();
         institutionName = instData?.name;
       }
 
@@ -91,14 +97,14 @@ export default function AdminUserProfile() {
         .from('subscriptions')
         .select('tier')
         .eq('user_id', id)
-        .single();
+        .maybeSingle();
 
       // Fetch AI credits
       const { data: creditsData } = await supabase
         .from('ai_credits')
         .select('credits_used, credits_limit')
         .eq('user_id', id)
-        .single();
+        .maybeSingle();
 
       // Fetch papers count
       const { count: papersCount } = await supabase

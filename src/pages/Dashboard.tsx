@@ -15,6 +15,8 @@ import { useAICredits } from "@/hooks/useAICredits";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/context/CurrencyContext";
 import { formatLagos } from "@/lib/dateUtils";
+import { AI_CREDIT_EXHAUSTED_MESSAGE, friendlyErrorMessage } from "@/lib/errorMessage";
+import { formatAmount, toNumber } from "@/lib/numberFormat";
 import {
   FileText,
   Eye,
@@ -102,7 +104,7 @@ export default function Dashboard() {
 
     if (wallet) {
       // Store the raw balance - it's already in Naira
-      setStats((prev) => ({ ...prev, credits: wallet.balance || 0 }));
+      setStats((prev) => ({ ...prev, credits: toNumber(wallet.balance) }));
     }
 
     // Fetch trending challenges (active, not expired, sorted by reward)
@@ -115,7 +117,10 @@ export default function Dashboard() {
       .limit(3);
 
     if (challenges) {
-      setTrendingChallenges(challenges);
+      setTrendingChallenges(challenges.map((challenge) => ({
+        ...challenge,
+        reward_amount: challenge.reward_amount == null ? null : toNumber(challenge.reward_amount),
+      })));
     }
   };
 
@@ -138,15 +143,13 @@ export default function Dashboard() {
         // Handle AI credits exhaustion
         if (data.error === "AI_CREDITS_EXHAUSTED") {
           toast({
-            title: "AI Credits Exhausted",
-            description:
-              data.message ||
-              "You have used all your AI credits for this month. Upgrade your subscription for more credits.",
+            title: "No AI Credits",
+            description: AI_CREDIT_EXHAUSTED_MESSAGE,
             variant: "destructive",
           });
           return;
         }
-        toast({ title: "AI Error", description: data.error, variant: "destructive" });
+        toast({ title: "AI Error", description: friendlyErrorMessage(data.message || data.error), variant: "destructive" });
         return;
       }
 
@@ -444,7 +447,7 @@ export default function Dashboard() {
                           <div className="flex flex-wrap items-center gap-2">
                             <Badge className="bg-emerald-500/20 text-emerald-600 text-xs rounded-full font-bold">
                               {challenge.reward_currency === "NGN" ? "₦" : "$"}
-                              {challenge.reward_amount?.toLocaleString()}
+                              {formatAmount(challenge.reward_amount)}
                             </Badge>
                             {daysRemaining !== null && (
                               <span

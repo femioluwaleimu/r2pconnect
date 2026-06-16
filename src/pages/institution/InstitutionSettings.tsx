@@ -13,6 +13,7 @@ import { Slider } from "@/components/ui/slider";
 import { useToast } from "@/hooks/use-toast";
 import { Settings, Loader2, Building2, DollarSign, Globe, Save, Upload, Image, Shield, AlertTriangle, Info, Download } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 const currencies = [
   { code: "NGN", name: "Nigerian Naira", symbol: "₦" },
@@ -91,7 +92,7 @@ export default function InstitutionSettings() {
           .select('value')
           .eq('key', 'download_credit_rate_ngn')
           .maybeSingle();
-        if (rateData?.value) setCreditRateNgn(rateData.value);
+        if (rateData?.value) setCreditRateNgn(String(toNumber(rateData.value, 100)));
 
         const savedCurrency = localStorage.getItem(`institution_currency_${data.id}`);
         if (savedCurrency) {
@@ -533,7 +534,7 @@ export default function InstitutionSettings() {
                 <Alert className="border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 dark:border-emerald-800">
                   <Info className="w-4 h-4 text-emerald-600" />
                   <AlertDescription className="text-emerald-700 dark:text-emerald-300">
-                    Downloaders will pay <strong>{downloadCreditCost} credits (₦{(downloadCreditCost * Number(creditRateNgn)).toLocaleString()})</strong> per download. Proceeds are shared between institution, supervisor, student, and the platform.
+                    Downloaders will pay <strong>{downloadCreditCost} credits ({formatCurrencyAmount(downloadCreditCost * toNumber(creditRateNgn))})</strong> per download. Proceeds are shared between institution, supervisor, student, and the platform.
                   </AlertDescription>
                 </Alert>
               )}

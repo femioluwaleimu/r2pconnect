@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Briefcase, Plus, Edit, Trash2, Loader2, Eye, EyeOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 const STUDENT_LEVELS = ['ND1', 'ND2', 'HND1', 'HND2', '100L', '200L', '300L', '400L', '500L', 'Graduate HND', 'Graduate BSc', 'Masters', 'PhD'];
 
@@ -52,7 +53,10 @@ export default function IPNOpportunities() {
       supabase.from("ipn_opportunities").select("*, ipn_companies(name)").eq("ipn_user_id", user.id).order("created_at", { ascending: false }),
       supabase.from("ipn_companies").select("id, name").eq("ipn_user_id", user.id).eq("is_active", true),
     ]);
-    setOpportunities((oppsRes.data || []) as any);
+    setOpportunities(((oppsRes.data || []) as any[]).map((opportunity) => ({
+      ...opportunity,
+      application_fee_ngn: toNumber(opportunity.application_fee_ngn),
+    })) as any);
     setCompanies(compsRes.data || []);
     setLoading(false);
   };
@@ -299,7 +303,7 @@ export default function IPNOpportunities() {
                       </div>
                       <p className="text-sm text-muted-foreground">
                         {(o as any).ipn_companies?.name}{o.location ? ` • ${o.location}` : ""}
-                        {o.is_paid ? ` • ₦${o.application_fee_ngn.toLocaleString()}` : " • Free"}
+                        {o.is_paid ? ` • ${formatCurrencyAmount(o.application_fee_ngn)}` : " • Free"}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">

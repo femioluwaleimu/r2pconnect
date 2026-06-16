@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Menu, Sun, Moon, LogOut, LayoutDashboard } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import PublicBrand from "./PublicBrand";
 const navLinks = [
   {
     label: "About",
@@ -82,20 +83,7 @@ export default function PublicHeader() {
     <nav className="sticky top-0 z-50 bg-card/80 backdrop-blur-lg border-b border-border">
       <div className="container mx-auto px-4 py-4 flex items-center justify-between">
         {/* Logo */}
-        <Link to="/" className="flex items-center gap-2">
-          <div className="w-10 h-10 rounded-xl gradient-hero flex items-center justify-center shadow-lg overflow-hidden">
-            <img
-              src="/placeholder.svg"
-              alt="Logo"
-              className="w-full h-full object-cover"
-            />
-          </div>
-
-          <div>
-            <span className="font-bold text-lg text-foreground">R2P CONNECT</span>
-            <span className="block text-xs text-primary">Research2Practice</span>
-          </div>
-        </Link>
+        <PublicBrand />
 
         {/* Desktop Navigation */}
         <div className="hidden md:flex items-center gap-6">
@@ -156,16 +144,7 @@ export default function PublicHeader() {
             <div className="flex flex-col h-full">
               {/* Mobile Header */}
               <div className="flex items-center justify-between p-4 border-b border-border">
-                <Link to="/" className="flex items-center gap-2" onClick={() => setOpen(false)}>
-                  <div className="w-10 h-10 rounded-xl gradient-hero flex items-center justify-center shadow-lg overflow-hidden">
-                    <img
-                      src="/placeholder.svg"
-                      alt="Logo"
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <span className="font-bold text-foreground">R2P CONNECT</span>
-                </Link>
+                <PublicBrand compact onClick={() => setOpen(false)} />
               </div>
 
               {/* Mobile Nav Links */}

@@ -43,6 +43,11 @@ interface SupervisorRecord {
 
 type FilterTab = "all" | "pending_verification" | "verified" | "rejected";
 
+const PENDING_SUPERVISOR_STATUSES = new Set(["pending", "pending_verification"]);
+
+const isPendingSupervisor = (status: string | null) =>
+  PENDING_SUPERVISOR_STATUSES.has(status || "");
+
 export default function AdminSupervisors() {
   const [supervisors, setSupervisors] = useState<SupervisorRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -172,9 +177,11 @@ export default function AdminSupervisors() {
 
   const getStatusBadge = (status: string | null) => {
     const normalizedStatus = status || "verified";
+    if (isPendingSupervisor(normalizedStatus)) {
+      return <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/20"><Clock className="w-3 h-3 mr-1" />Pending</Badge>;
+    }
+
     switch (normalizedStatus) {
-      case "pending_verification":
-        return <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/20"><Clock className="w-3 h-3 mr-1" />Pending</Badge>;
       case "verified":
         return <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20"><CheckCircle className="w-3 h-3 mr-1" />Verified</Badge>;
       case "rejected":
@@ -186,7 +193,10 @@ export default function AdminSupervisors() {
 
   const filtered = supervisors.filter((s) => {
     const status = s.verification_status || "verified";
-    const matchesTab = filterTab === "all" || status === filterTab;
+    const matchesTab =
+      filterTab === "all" ||
+      status === filterTab ||
+      (filterTab === "pending_verification" && isPendingSupervisor(status));
     const matchesSearch =
       !searchQuery ||
       s.profile?.full_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -197,7 +207,7 @@ export default function AdminSupervisors() {
 
   const stats = {
     total: supervisors.length,
-    pending: supervisors.filter((s) => s.verification_status === "pending_verification").length,
+    pending: supervisors.filter((s) => isPendingSupervisor(s.verification_status)).length,
     verified: supervisors.filter((s) => (s.verification_status || "verified") === "verified").length,
     rejected: supervisors.filter((s) => s.verification_status === "rejected").length,
   };
@@ -300,7 +310,7 @@ export default function AdminSupervisors() {
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0">
                       {getStatusBadge(sup.verification_status)}
-                      {sup.verification_status === "pending_verification" && (
+                      {isPendingSupervisor(sup.verification_status) && (
                         <div className="flex gap-1">
                           <Button
                             size="sm"

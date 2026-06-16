@@ -1,4 +1,4 @@
-import { Suspense, lazy } from "react";
+import { Component, Suspense, lazy } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ThemeProvider } from "next-themes";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import ScrollToTop from "@/components/ScrollToTop";
+import NetworkStatus from "@/components/NetworkStatus";
 import { CurrencyProvider } from "./context/CurrencyContext";
 import { AppSettingsProvider } from "./hooks/useAppSettings";
 import { PlatformSettingsProvider } from "./hooks/usePlatformSettings";
@@ -167,6 +168,40 @@ const PageLoader = () => (
   </div>
 );
 
+class RouteErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error("Route render failed:", error);
+  }
+
+  render() {
+    if (!this.state.hasError) return this.props.children;
+
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background px-4">
+        <div className="max-w-md text-center space-y-4">
+          <h1 className="text-2xl font-bold text-foreground">Page could not load</h1>
+          <p className="text-muted-foreground">
+            Please refresh the page. If this appeared after an update, your browser may still have an older cached page.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="inline-flex h-10 items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
@@ -176,9 +211,11 @@ const App = () => (
             <TooltipProvider>
               <Toaster />
               <Sonner />
+              <NetworkStatus />
               <BrowserRouter>
                 <ScrollToTop />
-                <Suspense fallback={<PageLoader />}>
+                <RouteErrorBoundary>
+                  <Suspense fallback={<PageLoader />}>
                   <Routes>
                   <Route path="/" element={<Landing />} />
                   <Route path="/auth" element={<Auth />} />
@@ -431,7 +468,7 @@ const App = () => (
                   <Route
                     path="/institution"
                     element={
-                      <ProtectedRoute allowedRoles={["institution"]}>
+                      <ProtectedRoute allowedRoles={["institution", "admin"]}>
                         <InstitutionDashboard />
                       </ProtectedRoute>
                     }
@@ -1011,8 +1048,9 @@ const App = () => (
 
                   {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
                   <Route path="*" element={<NotFound />} />
-                </Routes>
-              </Suspense>
+                  </Routes>
+                </Suspense>
+              </RouteErrorBoundary>
             </BrowserRouter>
             </TooltipProvider>
           </CurrencyProvider>

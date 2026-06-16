@@ -13,7 +13,25 @@ import {
 } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
 import { formatLagos } from "@/lib/dateUtils";
-const fmt = (d: string) => formatLagos(d, "datetime");
+import { formatRating } from "@/lib/numberFormat";
+const createUuid = () => {
+  const cryptoApi = globalThis.crypto;
+  if (cryptoApi?.randomUUID) {
+    return cryptoApi.randomUUID();
+  }
+
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const random = Math.floor(Math.random() * 16);
+    const value = char === "x" ? random : (random & 0x3) | 0x8;
+    return value.toString(16);
+  });
+};
+
+const fmt = (date?: string | null) => {
+  if (!date) return "";
+  const value = formatLagos(date, "datetime");
+  return value === "Unknown date" ? "" : value;
+};
 import { History, MessageSquare, Send, Sparkles, Star, Trash2, GraduationCap, User as UserIcon, Shield } from "lucide-react";
 
 interface Review {
@@ -125,12 +143,16 @@ export default function SharedAIReviewHistory({ researchId, viewerRole }: Props)
     if (!text || !currentUserId) return;
     setPosting(reviewId);
     try {
+      const now = new Date().toISOString();
       const { error } = await supabase.from("chapter_review_comments").insert({
+        id: createUuid(),
         review_id: reviewId,
         research_id: researchId,
         user_id: currentUserId,
         author_role: viewerRole,
         comment: text,
+        created_at: now,
+        updated_at: now,
       });
       if (error) throw error;
       setDrafts((d) => ({ ...d, [reviewId]: "" }));
@@ -211,7 +233,7 @@ export default function SharedAIReviewHistory({ researchId, viewerRole }: Props)
                         {r.rating != null && (
                           <Badge variant="secondary" className="text-[10px] gap-1">
                             <Star className="w-3 h-3 fill-amber-500 text-amber-500" />
-                            {Number(r.rating).toFixed(1)}
+                            {formatRating(r.rating)}
                           </Badge>
                         )}
                         {cs.length > 0 && (
@@ -249,9 +271,11 @@ export default function SharedAIReviewHistory({ researchId, viewerRole }: Props)
                                   {c.author_role}
                                 </Badge>
                                 <span className="text-xs font-medium">{c.author_name}</span>
-                                <span className="text-[11px] text-muted-foreground">
-                                  {fmt(c.created_at)}
-                                </span>
+                                {fmt(c.created_at) && (
+                                  <span className="text-[11px] text-muted-foreground">
+                                    {fmt(c.created_at)}
+                                  </span>
+                                )}
                               </div>
                               <p className="text-sm whitespace-pre-wrap break-words">{c.comment}</p>
                             </div>

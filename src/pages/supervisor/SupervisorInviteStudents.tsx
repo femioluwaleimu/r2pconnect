@@ -13,8 +13,8 @@ import {
   UserPlus,
   Copy,
   Link as LinkIcon,
+  ExternalLink,
   Clock,
-  CheckCircle,
   Loader2,
   AlertCircle,
   Users,
@@ -31,6 +31,16 @@ interface InviteLink {
   is_active: boolean;
   created_at: string;
 }
+
+const createId = () =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+const isEnabled = (value: unknown) => value === true || value === 1 || value === "1";
+
+const inviteUrl = (code: string) =>
+  `${window.location.origin}/auth?mode=signup&supervisor_invite=${encodeURIComponent(code)}`;
 
 export default function SupervisorInviteStudents() {
   const [user, setUser] = useState<User | null>(null);
@@ -103,11 +113,14 @@ export default function SupervisorInviteStudents() {
       const inviteCode = generateInviteCode();
 
       const { error } = await supabase.from("supervisor_student_invites").insert({
+        id: createId(),
         supervisor_id: user.id,
         institution_id: supervisor?.institution_id || null,
         department: supervisor?.department || null,
         invite_code: inviteCode,
         max_students: maxStudents,
+        used_count: 0,
+        is_active: true,
         expires_at: new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000).toISOString(),
       });
 
@@ -143,10 +156,32 @@ export default function SupervisorInviteStudents() {
     }
   };
 
-  const copyInviteLink = (code: string) => {
-    const link = `${window.location.origin}/auth?mode=signup&supervisor_invite=${code}`;
-    navigator.clipboard.writeText(link);
-    toast({ title: "Link copied!", description: "Share this with your students" });
+  const copyInviteLink = async (code: string) => {
+    const link = inviteUrl(code);
+
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(link);
+      } else {
+        const input = document.createElement("textarea");
+        input.value = link;
+        input.setAttribute("readonly", "");
+        input.style.position = "fixed";
+        input.style.left = "-9999px";
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand("copy");
+        document.body.removeChild(input);
+      }
+
+      toast({ title: "Link copied!", description: link });
+    } catch (error) {
+      toast({
+        title: "Copy failed",
+        description: "Select and copy the visible invite link manually.",
+        variant: "destructive",
+      });
+    }
   };
 
   const isVerified = verificationStatus === "verified";
@@ -247,9 +282,12 @@ export default function SupervisorInviteStudents() {
             ) : (
               <div className="space-y-3">
                 {invites.map((invite) => {
+                  const usedCount = Number(invite.used_count || 0);
+                  const maxAllowed = Number(invite.max_students || 0);
                   const isExpired = new Date(invite.expires_at) < new Date();
-                  const isFull = invite.used_count >= invite.max_students;
-                  const isActive = invite.is_active && !isExpired && !isFull;
+                  const isFull = maxAllowed > 0 && usedCount >= maxAllowed;
+                  const isActive = isEnabled(invite.is_active) && !isExpired && !isFull;
+                  const link = inviteUrl(invite.invite_code);
 
                   return (
                     <div
@@ -272,10 +310,21 @@ export default function SupervisorInviteStudents() {
                               <Badge variant="secondary">Inactive</Badge>
                             )}
                           </div>
+                          <div className="flex items-center gap-2 max-w-full">
+                            <LinkIcon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                            <a
+                              href={link}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs text-primary underline-offset-2 hover:underline truncate"
+                            >
+                              {link}
+                            </a>
+                          </div>
                           <div className="flex items-center gap-4 text-xs text-muted-foreground">
                             <span className="flex items-center gap-1">
                               <Users className="w-3 h-3" />
-                              {invite.used_count}/{invite.max_students} students
+                              {usedCount}/{maxAllowed} students
                             </span>
                             <span className="flex items-center gap-1">
                               <Clock className="w-3 h-3" />
@@ -294,6 +343,17 @@ export default function SupervisorInviteStudents() {
                               >
                                 <Copy className="w-3.5 h-3.5 mr-1" />
                                 Copy Link
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="rounded-xl"
+                                asChild
+                              >
+                                <a href={link} target="_blank" rel="noreferrer">
+                                  <ExternalLink className="w-3.5 h-3.5 mr-1" />
+                                  Open
+                                </a>
                               </Button>
                               <Button
                                 variant="ghost"

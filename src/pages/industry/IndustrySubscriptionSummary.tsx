@@ -169,6 +169,7 @@ export default function IndustrySubscriptionSummary() {
           planId: plan.plan_id.replace("industry_", ""),
           userType: "industry",
           couponId: appliedCoupon?.id || null,
+          couponCode: appliedCoupon?.code || null,
         }
       });
 

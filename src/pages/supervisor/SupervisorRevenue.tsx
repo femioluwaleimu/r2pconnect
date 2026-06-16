@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Wallet, TrendingUp, Users, ArrowUpRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatLagos } from "@/lib/dateUtils";
+import { formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 interface Earning {
   id: string;
@@ -42,7 +43,12 @@ export default function SupervisorRevenue() {
       .eq("user_id", userId)
       .maybeSingle();
 
-    if (walletData) setWallet(walletData);
+    if (walletData) setWallet({
+      ...walletData,
+      balance: toNumber(walletData.balance),
+      total_earned: toNumber(walletData.total_earned),
+      total_withdrawn: toNumber(walletData.total_withdrawn),
+    });
     else setWallet({ balance: 0, total_earned: 0, total_withdrawn: 0, currency: "NGN" });
 
     // Fetch earnings
@@ -66,6 +72,7 @@ export default function SupervisorRevenue() {
       
       setEarnings(earningsData.map(e => ({
         ...e,
+        amount: toNumber(e.amount),
         student_name: nameMap.get(e.student_id) || "Unknown Student"
       })));
     }
@@ -73,7 +80,7 @@ export default function SupervisorRevenue() {
     setLoading(false);
   };
 
-  const formatCurrency = (amount: number) => `₦${amount.toLocaleString()}`;
+  const formatCurrency = (amount: number) => formatCurrencyAmount(amount);
 
   if (loading) {
     return (

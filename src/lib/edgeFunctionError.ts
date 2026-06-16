@@ -1,3 +1,5 @@
+import { friendlyErrorMessage, NO_INTERNET_CONNECTION_MESSAGE } from "@/lib/errorMessage";
+
 /**
  * Extracts a user-friendly error message from edge function responses.
  * Handles various error response formats and provides meaningful defaults.
@@ -7,7 +9,7 @@ export function getEdgeFunctionError(error: any, fallback: string = "An unexpect
   
   // If it's a string, return it directly
   if (typeof error === 'string') {
-    return error;
+    return friendlyErrorMessage(error, fallback);
   }
 
   // Try to extract actual error from context body first (highest priority)
@@ -16,8 +18,8 @@ export function getEdgeFunctionError(error: any, fallback: string = "An unexpect
       const body = typeof error.context.body === 'string' 
         ? JSON.parse(error.context.body) 
         : error.context.body;
-      if (body.error && typeof body.error === 'string') return body.error;
-      if (body.message && typeof body.message === 'string') return body.message;
+      if (body.error && typeof body.error === 'string') return friendlyErrorMessage(body.error, fallback);
+      if (body.message && typeof body.message === 'string') return friendlyErrorMessage(body.message, fallback);
     } catch {
       // continue to other checks
     }
@@ -31,14 +33,14 @@ export function getEdgeFunctionError(error: any, fallback: string = "An unexpect
     }
     // Never show generic fetch errors
     if (error.message.includes('Failed to send a request to the Edge Function')) {
-      return 'Service temporarily unavailable. Please try again.';
+      return NO_INTERNET_CONNECTION_MESSAGE;
     }
-    return error.message;
+    return friendlyErrorMessage(error.message, fallback);
   }
   
   // Check for error property directly
   if (error.error) {
-    return typeof error.error === 'string' ? error.error : fallback;
+    return typeof error.error === 'string' ? friendlyErrorMessage(error.error, fallback) : fallback;
   }
   
   return fallback;
@@ -58,7 +60,8 @@ export function handleEdgeFunctionResponse<T>(
   
   // Check if data contains an error field
   if (data && typeof data === 'object' && 'error' in data) {
-    return [null, (data as any).error];
+    const responseError = (data as any).message || (data as any).error;
+    return [null, friendlyErrorMessage(responseError)];
   }
   
   return [data, null];

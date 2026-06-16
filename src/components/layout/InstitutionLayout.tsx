@@ -6,7 +6,7 @@ import type { User, Session } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
-import { usePlatformSettings } from "@/hooks/usePlatformSettings";
+import AppLogo from "./AppLogo";
 import {
   LayoutDashboard,
   Users,
@@ -23,6 +23,7 @@ import {
   Moon,
   Wallet,
   Shield,
+  ArrowLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -51,14 +52,13 @@ export default function InstitutionLayout({ children }: InstitutionLayoutProps) 
   const [session, setSession] = useState<Session | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [institutionName, setInstitutionName] = useState("Institution");
+  const [isAdminInstitutionAccess, setIsAdminInstitutionAccess] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [profileName, setProfileName] = useState<string | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
   const { theme, setTheme } = useTheme();
-  const { platformLogo } = usePlatformSettings();
-
   useEffect(() => {
     const {
       data: { subscription },
@@ -91,12 +91,32 @@ export default function InstitutionLayout({ children }: InstitutionLayoutProps) 
   }, [user]);
 
   const fetchInstitution = async (userId: string) => {
+    const requestedInstitutionId = new URLSearchParams(location.search).get("institution_id");
+    const { data: role } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (role?.role === "admin" && requestedInstitutionId) {
+      setIsAdminInstitutionAccess(true);
+      const { data } = await supabase.from("institutions").select("name").eq("id", requestedInstitutionId).maybeSingle();
+
+      if (data) {
+        setInstitutionName(data.name);
+      }
+      return;
+    }
+
+    setIsAdminInstitutionAccess(false);
     const { data } = await supabase.from("institutions").select("name").eq("admin_user_id", userId).maybeSingle();
 
     if (data) {
       setInstitutionName(data.name);
     }
   };
+
+  const linkFor = (href: string) => `${href}${location.search || ""}`;
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -105,6 +125,9 @@ export default function InstitutionLayout({ children }: InstitutionLayoutProps) 
   };
 
   const userName = profileName || user?.user_metadata?.full_name || user?.email?.split("@")[0] || "Admin";
+  const visibleSidebarItems = isAdminInstitutionAccess
+    ? sidebarItems.filter((item) => item.href === "/institution")
+    : sidebarItems;
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -123,17 +146,7 @@ export default function InstitutionLayout({ children }: InstitutionLayoutProps) 
         {/* Logo */}
         <div className="p-4 border-b border-white/10 flex-shrink-0">
           <Link to="/" className="flex items-center gap-3">
-            {platformLogo ? (
-              <img src={platformLogo} alt="Logo" className="w-10 h-10 rounded-xl object-contain" />
-            ) : (
-              <div className="w-10 h-10 rounded-xl gradient-hero flex items-center justify-center shadow-lg overflow-hidden">
-                <img
-                  src="/placeholder.svg"
-                  alt="Logo"
-                  className="w-full h-full object-cover"
-                />
-              </div>
-            )}
+            <AppLogo className="w-10 h-10 rounded-xl" />
             <div>
               <span className="font-bold text-lg text-white truncate block max-w-[160px]">{institutionName}</span>
               <span className="block text-xs text-white/70">R2P CONNECT</span>
@@ -143,12 +156,22 @@ export default function InstitutionLayout({ children }: InstitutionLayoutProps) 
 
         {/* Navigation - Scrollable */}
         <nav className="flex-1 overflow-y-auto p-4 space-y-1 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent">
-          {sidebarItems.map((item) => {
+          {isAdminInstitutionAccess && (
+            <Link
+              to="/admin/institutions"
+              onClick={() => setSidebarOpen(false)}
+              className="flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-white/80 hover:bg-white/10 hover:text-white"
+            >
+              <ArrowLeft className="w-5 h-5" />
+              Back to Admin
+            </Link>
+          )}
+          {visibleSidebarItems.map((item) => {
             const isActive = location.pathname === item.href;
             return (
               <Link
                 key={item.href}
-                to={item.href}
+                to={linkFor(item.href)}
                 onClick={() => setSidebarOpen(false)}
                 className={cn(
                   "flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all",
@@ -174,7 +197,7 @@ export default function InstitutionLayout({ children }: InstitutionLayoutProps) 
             <div className="flex-1 min-w-0">
               <p className="font-medium text-white truncate">{userName}</p>
               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-white/20 text-white/90">
-                institution
+                {isAdminInstitutionAccess ? "admin access" : "institution"}
               </span>
             </div>
           </div>

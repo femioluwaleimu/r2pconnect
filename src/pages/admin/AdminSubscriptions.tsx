@@ -38,6 +38,7 @@ import {
   Zap
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 interface SubscriptionPlan {
   id: string;
@@ -103,6 +104,7 @@ export default function AdminSubscriptions() {
       // Cast features from Json to string[]
       const parsedPlans = (data || []).map(plan => ({
         ...plan,
+        amount_ngn: toNumber(plan.amount_ngn),
         features: Array.isArray(plan.features) ? plan.features as string[] : []
       }));
       setPlans(parsedPlans);
@@ -518,7 +520,7 @@ function PlanTable({
                 </div>
               </TableCell>
               <TableCell>
-                <span className="font-semibold">₦{plan.amount_ngn?.toLocaleString()}</span>
+                <span className="font-semibold">{formatCurrencyAmount(plan.amount_ngn)}</span>
                 <span className="text-muted-foreground">/{plan.period}</span>
               </TableCell>
               <TableCell>

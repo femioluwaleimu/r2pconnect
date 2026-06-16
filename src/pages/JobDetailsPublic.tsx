@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { useSEO } from "@/hooks/useSEO";
 import { formatLagos } from "@/lib/dateUtils";
+import { formatAmount, formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 interface JobPosting {
   id: string;
@@ -203,7 +204,7 @@ export default function JobDetailsPublic() {
         industry_id: oppData.ipn_user_id,
         created_at: oppData.created_at,
         is_paid: oppData.is_paid,
-        application_fee_ngn: oppData.application_fee_ngn,
+        application_fee_ngn: toNumber(oppData.application_fee_ngn),
         requires_cv: oppData.requires_cv || false,
         work_mode: (oppData as any).work_mode || null,
         source: "ipn",
@@ -221,7 +222,13 @@ export default function JobDetailsPublic() {
       .single();
 
     if (error || !jobData) { setLoading(false); return; }
-    setJob({ ...jobData, source: "direct" as const, real_id: jobData.id });
+    setJob({
+      ...jobData,
+      application_fee_ngn: toNumber((jobData as any).application_fee_ngn),
+      payment_amount: jobData.payment_amount == null ? null : toNumber(jobData.payment_amount),
+      source: "direct" as const,
+      real_id: jobData.id,
+    });
 
     const { data: profileData } = await supabase
       .from('profiles')
@@ -409,7 +416,7 @@ export default function JobDetailsPublic() {
                 <div className="flex items-center gap-2 mt-2">
                   <Badge variant="outline" className={jobTypeColors[job.job_type] || ""}>{jobTypeLabels[job.job_type] || job.job_type}</Badge>
                   {job.is_paid && (job.application_fee_ngn || 0) > 0 && (
-                    <Badge className="bg-amber-500/10 text-amber-600 border-amber-200">Application Fee: ₦{(job.application_fee_ngn || 0).toLocaleString()}</Badge>
+                    <Badge className="bg-amber-500/10 text-amber-600 border-amber-200">Application Fee: {formatCurrencyAmount(job.application_fee_ngn)}</Badge>
                   )}
                 </div>
               </CardContent>
@@ -521,7 +528,7 @@ export default function JobDetailsPublic() {
             <Alert className="rounded-2xl border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20">
               <Info className="w-4 h-4 text-amber-600" />
               <AlertDescription className="text-sm text-amber-700 dark:text-amber-400">
-                You must be registered as a <strong>Researcher / Student / Job</strong> role to apply for jobs. If you registered under a different role, please create a new account with the correct role.
+                You must be registered as a <strong>Student Research / Jobs</strong> role to apply for jobs. If you registered under a different role, please create a new account with the correct role.
               </AlertDescription>
             </Alert>
 
@@ -539,7 +546,7 @@ export default function JobDetailsPublic() {
             {/* Submit */}
             <Button onClick={handleApply} disabled={applying} className="w-full rounded-xl gradient-hero text-white h-12 text-lg">
               {applying ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : null}
-              {job.is_paid && (job.application_fee_ngn || 0) > 0 ? `Pay ₦${(job.application_fee_ngn || 0).toLocaleString()} & Submit` : "Submit Application"}
+              {job.is_paid && (job.application_fee_ngn || 0) > 0 ? `Pay ${formatCurrencyAmount(job.application_fee_ngn)} & Submit` : "Submit Application"}
               <ArrowRight className="w-5 h-5 ml-2" />
             </Button>
           </div>
@@ -640,7 +647,7 @@ export default function JobDetailsPublic() {
                     <div className="text-center pb-4 border-b border-border">
                       <p className="text-sm text-muted-foreground mb-1">Compensation</p>
                        <p className="text-2xl md:text-3xl font-bold text-gradient">
-                        {job.payment_currency || '₦'}{job.payment_amount.toLocaleString()}
+                        {job.payment_currency || '₦'}{formatAmount(job.payment_amount)}
                       </p>
                     </div>
                   )}
@@ -677,7 +684,7 @@ export default function JobDetailsPublic() {
 
                   {job.is_paid && (job.application_fee_ngn || 0) > 0 && (
                     <div className="text-center p-3 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
-                      <p className="text-sm text-amber-700 dark:text-amber-400 font-medium">Application Fee: ₦{(job.application_fee_ngn || 0).toLocaleString()}</p>
+                      <p className="text-sm text-amber-700 dark:text-amber-400 font-medium">Application Fee: {formatCurrencyAmount(job.application_fee_ngn)}</p>
                     </div>
                   )}
 

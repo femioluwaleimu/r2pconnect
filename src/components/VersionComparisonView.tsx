@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { formatLagos } from "@/lib/dateUtils";
 import { useToast } from "@/hooks/use-toast";
+import { AI_CREDIT_EXHAUSTED_MESSAGE, friendlyErrorMessage } from "@/lib/errorMessage";
 import {
   Collapsible,
   CollapsibleContent,
@@ -143,8 +144,8 @@ Please analyze the differences between the student's original submission and the
       if (error) {
         if (error.message?.includes("AI_CREDITS_EXHAUSTED")) {
           toast({
-            title: "AI Credits Exhausted",
-            description: "You've used all your AI credits. Upgrade your subscription for more.",
+            title: "No AI Credits",
+            description: AI_CREDIT_EXHAUSTED_MESSAGE,
             variant: "destructive",
           });
           return;
@@ -186,7 +187,7 @@ Please analyze the differences between the student's original submission and the
       console.error("Error analyzing comparison:", error);
       toast({
         title: "Analysis Failed",
-        description: error.message || "Failed to analyze version differences",
+        description: friendlyErrorMessage(error.message, "Failed to analyze version differences"),
         variant: "destructive",
       });
     } finally {

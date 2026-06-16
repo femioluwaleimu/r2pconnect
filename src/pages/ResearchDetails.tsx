@@ -7,6 +7,7 @@ import { useCurrency } from "@/context/CurrencyContext";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -136,6 +137,51 @@ const fundingLabels: Record<string, { label: string; color: string }> = {
   funded: { label: "Funded", color: "bg-stat-green/20 text-stat-green" }
 };
 
+const toStringArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.map(String).filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map(String).filter(Boolean);
+      }
+    } catch {
+      // Fall through to comma-separated legacy values.
+    }
+
+    return trimmed.split(",").map((item) => item.trim()).filter(Boolean);
+  }
+
+  return [];
+};
+
+const normalizePaper = (value: any): ResearchPaper => ({
+  ...value,
+  practical_applications: toStringArray(value?.practical_applications),
+  keywords: toStringArray(value?.keywords),
+  industry_tags: toStringArray(value?.industry_tags),
+  author_names: toStringArray(value?.author_names),
+  views_count: Number(value?.views_count || 0),
+  downloads_count: Number(value?.downloads_count || 0),
+  funding_required: value?.funding_required === null || value?.funding_required === undefined
+    ? null
+    : Number(value.funding_required),
+  download_credit_cost: value?.download_credit_cost === null || value?.download_credit_cost === undefined
+    ? null
+    : Number(value.download_credit_cost),
+  allow_download: value?.allow_download === null || value?.allow_download === undefined
+    ? null
+    : !(value.allow_download === false || value.allow_download === 0 || value.allow_download === "0"),
+  is_published_journal: value?.is_published_journal === true || value?.is_published_journal === 1 || value?.is_published_journal === "1",
+  is_patented: value?.is_patented === true || value?.is_patented === 1 || value?.is_patented === "1",
+});
+
 // No longer need parseAISummary - using database fields directly
 
 export default function ResearchDetails() {
@@ -181,14 +227,15 @@ export default function ResearchDetails() {
     }
 
     if (data) {
-      setPaper(data);
-      setIsOwner(currentUserId === data.author_id);
+      const normalizedPaper = normalizePaper(data);
+      setPaper(normalizedPaper);
+      setIsOwner(currentUserId === normalizedPaper.author_id);
 
       // Fetch author profile
       const { data: authorData } = await supabase
         .from('public_profiles')
         .select('full_name, avatar_url, institution_id')
-        .eq('user_id', data.author_id)
+        .eq('user_id', normalizedPaper.author_id)
         .maybeSingle();
 
       if (authorData) {
@@ -201,7 +248,11 @@ export default function ResearchDetails() {
             .maybeSingle();
           if (instData) {
             setInstitutionInfo(instData);
-            if (instData.download_credit_cost !== null && instData.download_credit_cost !== undefined) {
+            if (
+              normalizedPaper.research_type === "student" &&
+              instData.download_credit_cost !== null &&
+              instData.download_credit_cost !== undefined
+            ) {
               setPaper(prev => prev ? { ...prev, download_credit_cost: instData.download_credit_cost } : prev);
             }
           }
@@ -307,10 +358,15 @@ export default function ResearchDetails() {
   const isSupervisorApproved = paper.research_type === 'student' && paper.supervisor_approval_status === 'approved';
   const displayStatus = isSupervisorApproved ? supervisorApprovedConfig : (statusConfig[paper.status] || statusConfig.draft);
   const StatusIcon = displayStatus.icon;
-  const fundingInfo = fundingLabels[paper.funding_status || 'unfunded'];
+  const fundingInfo = fundingLabels[paper.funding_status || 'unfunded'] || fundingLabels.unfunded;
   
   // Use database fields directly
   const hasSummaryData = paper.problem_statement || paper.solution_approach || (paper.practical_applications && paper.practical_applications.length > 0);
+  const hasSidebarContent =
+    (paper.research_type === 'completed' && (paper.is_published_journal || paper.is_patented)) ||
+    (paper.file_url && (isOwner || paper.allow_download !== false)) ||
+    (paper.keywords && paper.keywords.length > 0) ||
+    (paper.industry_tags && paper.industry_tags.length > 0);
 
   return (
     <DashboardLayout>
@@ -538,8 +594,8 @@ export default function ResearchDetails() {
         </div>
 
         {/* Content */}
-        <div className="grid lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6">
+        <div className={hasSidebarContent ? "grid xl:grid-cols-12 gap-6 items-start" : "space-y-6"}>
+          <div className={hasSidebarContent ? "xl:col-span-9 space-y-6" : "space-y-6"}>
             {/* Research Field & Funding Info */}
             <Card className="rounded-2xl shadow-tick">
               <CardContent className="p-6">
@@ -619,7 +675,7 @@ export default function ResearchDetails() {
                   <h3 className="text-lg font-bold text-foreground">Research Analysis</h3>
                 </div>
 
-                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-4 grid-cols-1 md:grid-cols-3">
                   {/* Problem Card */}
                   {paper.problem_statement && (
                     <Card className="rounded-2xl shadow-tick border-l-4 border-l-destructive bg-gradient-to-br from-destructive/5 to-destructive/10">
@@ -656,7 +712,7 @@ export default function ResearchDetails() {
 
                   {/* Application Card */}
                   {paper.practical_applications && paper.practical_applications.length > 0 && (
-                    <Card className="rounded-2xl shadow-tick border-l-4 border-l-stat-green bg-gradient-to-br from-stat-green/5 to-stat-green/10 sm:col-span-2 lg:col-span-1">
+                    <Card className="rounded-2xl shadow-tick border-l-4 border-l-stat-green bg-gradient-to-br from-stat-green/5 to-stat-green/10 md:col-span-1">
                       <CardContent className="p-4 sm:p-5">
                         <div className="flex items-center gap-2 mb-3">
                           <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-stat-green flex items-center justify-center flex-shrink-0">
@@ -694,7 +750,8 @@ export default function ResearchDetails() {
             )}
           </div>
 
-          <div className="space-y-6">
+          {hasSidebarContent && (
+          <div className="xl:col-span-3 space-y-6">
             {/* Journal & Patent Info */}
             {paper.research_type === 'completed' && (paper.is_published_journal || paper.is_patented) && (
               <Card className="rounded-2xl shadow-tick">
@@ -769,7 +826,32 @@ export default function ResearchDetails() {
                           }}
                         />
                       </div>
-                      {paper.allow_download !== false && (
+                      {paper.allow_download !== false && paper.research_type === 'completed' && (
+                        <div className="flex items-center gap-3 mt-3">
+                          <Label className="text-xs text-muted-foreground shrink-0">Download cost</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={paper.download_credit_cost || 0}
+                            onChange={async (e) => {
+                              const cost = Math.max(0, parseInt(e.target.value, 10) || 0);
+                              const { error } = await supabase
+                                .from('research_papers')
+                                .update({ download_credit_cost: cost })
+                                .eq('id', paper.id);
+                              if (error) {
+                                toast({ title: "Error", description: error.message, variant: "destructive" });
+                                return;
+                              }
+                              setPaper({ ...paper, download_credit_cost: cost });
+                            }}
+                            className="h-9 max-w-28 rounded-xl"
+                          />
+                          <span className="text-xs text-muted-foreground">credits</span>
+                        </div>
+                      )}
+                      {paper.allow_download !== false && paper.research_type === 'student' && (
                         <p className="text-xs text-muted-foreground mt-1">
                           Download cost is set by your institution ({paper.download_credit_cost || 0} credits)
                         </p>
@@ -836,6 +918,7 @@ export default function ResearchDetails() {
               </Card>
             )}
           </div>
+          )}
         </div>
       </div>
     </DashboardLayout>

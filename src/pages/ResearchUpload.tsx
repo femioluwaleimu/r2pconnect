@@ -58,6 +58,32 @@ interface Supervisor {
   isExternal?: boolean;
 }
 
+const isDatabaseQueryError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String((error as any)?.message || error || "");
+  return message.includes("Database query failed") || message.includes("Database query error");
+};
+
+const createUuid = () => {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return cryptoApi.randomUUID();
+  }
+
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const rand = Math.floor(Math.random() * 16);
+    const value = char === "x" ? rand : (rand & 0x3) | 0x8;
+    return value.toString(16);
+  });
+};
+
 export default function ResearchUpload() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(false);
@@ -155,19 +181,29 @@ export default function ResearchUpload() {
 
   const fetchInvitedSupervisors = async (userId: string) => {
     try {
-      const { data: invites } = await supabase
+      const { data: invites, error: invitesError } = await supabase
         .from('external_supervisor_invites')
         .select('email, full_name, department')
         .eq('student_id', userId)
         .eq('status', 'accepted');
 
+      if (invitesError) {
+        if (isDatabaseQueryError(invitesError)) {
+          setInvitedSupervisors([]);
+          return;
+        }
+        throw invitesError;
+      }
+
       if (!invites || invites.length === 0) return;
 
       const emails = invites.map(i => i.email);
-      const { data: profiles } = await supabase
+      const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('user_id, full_name, email, department')
         .in('email', emails);
+
+      if (profilesError) throw profilesError;
 
       if (profiles && profiles.length > 0) {
         const list: Supervisor[] = profiles.map(p => ({
@@ -330,6 +366,7 @@ export default function ResearchUpload() {
       const { error } = await supabase
         .from('research_papers')
         .insert({
+          id: createUuid(),
           title: formData.title,
           abstract: formData.abstract,
           ai_summary: formData.aiSummary || null,
@@ -352,6 +389,9 @@ export default function ResearchUpload() {
           co_supervisor_id: formData.researchType === 'student' && formData.coSupervisorId ? formData.coSupervisorId : null,
           supervisor_approval_status: formData.researchType === 'student' ? 'pending' : null,
           allow_download: formData.allowDownload,
+          download_credit_cost: formData.researchType === 'completed' && formData.allowDownload
+            ? Math.max(0, formData.downloadCreditCost)
+            : 0,
           author_names: formData.authorNames.length > 0 ? formData.authorNames : null,
         });
 
@@ -871,7 +911,21 @@ export default function ResearchUpload() {
                   onCheckedChange={(checked) => setFormData({ ...formData, allowDownload: checked })}
                 />
               </div>
-              {formData.allowDownload && (
+              {formData.allowDownload && formData.researchType === 'completed' && (
+                <div className="pt-3 border-t">
+                  <Label className="text-sm font-medium">Download Cost (credits)</Label>
+                  <p className="text-xs text-muted-foreground mb-2">Set how many credits others need to download this completed research.</p>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.downloadCreditCost}
+                    onChange={(e) => setFormData({ ...formData, downloadCreditCost: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                    className="mt-1.5 rounded-xl"
+                  />
+                </div>
+              )}
+              {formData.allowDownload && formData.researchType === 'student' && (
                 <p className="text-xs text-muted-foreground pt-3 border-t">
                   Download credit cost will be set by your institution.
                 </p>

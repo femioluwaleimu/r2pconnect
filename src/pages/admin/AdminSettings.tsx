@@ -35,8 +35,8 @@ const defaultSettings: PlatformSettings = {
   platform_logo: "",
   download_credit_rate_ngn: "100",
   ipn_activation_fee_ngn: "5000",
-  ai_primary_provider: "openai",
-  ai_fallback_provider: "deepseek",
+  ai_primary_provider: "deepseek",
+  ai_fallback_provider: "openai",
   openai_model: "gpt-5.4-mini",
   deepseek_model: "deepseek-v4-flash",
   app_notifications: true,
@@ -61,8 +61,30 @@ const deepSeekModels = [
   { value: "deepseek-reasoner", label: "DeepSeek Reasoner (legacy)" },
 ];
 
+const createUuid = () => {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return cryptoApi.randomUUID();
+  }
+
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const rand = Math.floor(Math.random() * 16);
+    const value = char === "x" ? rand : (rand & 0x3) | 0x8;
+    return value.toString(16);
+  });
+};
+
 export default function AdminSettings() {
   const [settings, setSettings] = useState<PlatformSettings>(defaultSettings);
+  const [settingIds, setSettingIds] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -78,14 +100,19 @@ export default function AdminSettings() {
     try {
       const { data, error } = await supabase
         .from('platform_settings')
-        .select('key, value');
+        .select('id, key, value');
 
       if (error) throw error;
 
       if (data && data.length > 0) {
         const settingsObj: PlatformSettings = { ...defaultSettings };
+        const ids: Record<string, string> = {};
         data.forEach((item) => {
           const key = item.key;
+          if (item.id) {
+            ids[key] = item.id;
+          }
+
           if (key === 'platform_name' || key === 'support_email' || key === 'platform_logo' || key === 'download_credit_rate_ngn' || key === 'ipn_activation_fee_ngn' || key === 'openai_model' || key === 'deepseek_model') {
             settingsObj[key] = item.value || '';
           } else if (key === 'ai_primary_provider' || key === 'ai_fallback_provider') {
@@ -96,6 +123,7 @@ export default function AdminSettings() {
             settingsObj[key] = item.value === 'true';
           }
         });
+        setSettingIds(ids);
         setSettings(settingsObj);
       }
     } catch (error) {
@@ -159,6 +187,7 @@ export default function AdminSettings() {
       if (!user) throw new Error("Not authenticated");
 
       const settingsToSave = Object.entries(settings).map(([key, value]) => ({
+        id: settingIds[key] || createUuid(),
         key,
         value: String(value),
         updated_by: user.id,
@@ -172,6 +201,11 @@ export default function AdminSettings() {
         if (error) throw error;
       }
 
+      setSettingIds(prev => ({
+        ...prev,
+        ...Object.fromEntries(settingsToSave.map(setting => [setting.key, setting.id])),
+      }));
+
       await refetchPlatformSettings();
       toast({ title: "Settings saved successfully" });
     } catch (error: any) {
@@ -183,6 +217,37 @@ export default function AdminSettings() {
 
   const updateSetting = <K extends keyof PlatformSettings>(key: K, value: PlatformSettings[K]) => {
     setSettings(prev => ({ ...prev, [key]: value }));
+  };
+
+  const saveSettingsPatch = async (patch: Partial<PlatformSettings>, successTitle = "Settings saved") => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
+
+      const settingsToSave = Object.entries(patch).map(([key, value]) => ({
+        id: settingIds[key] || createUuid(),
+        key,
+        value: String(value),
+        updated_by: user.id,
+      }));
+
+      for (const setting of settingsToSave) {
+        const { error } = await supabase
+          .from('platform_settings')
+          .upsert(setting, { onConflict: 'key' });
+
+        if (error) throw error;
+      }
+
+      setSettingIds(prev => ({
+        ...prev,
+        ...Object.fromEntries(settingsToSave.map(setting => [setting.key, setting.id])),
+      }));
+      await refetchPlatformSettings();
+      toast({ title: successTitle });
+    } catch (error: any) {
+      toast({ title: "Error saving settings", description: error.message, variant: "destructive" });
+    }
   };
 
   if (loading) {
@@ -372,10 +437,16 @@ export default function AdminSettings() {
                 <Select
                   value={settings.ai_primary_provider}
                   onValueChange={(value: "openai" | "deepseek") => {
-                    updateSetting('ai_primary_provider', value);
-                    if (value === settings.ai_fallback_provider) {
-                      updateSetting('ai_fallback_provider', value === 'openai' ? 'deepseek' : 'openai');
-                    }
+                    const fallback = value === settings.ai_fallback_provider
+                      ? value === 'openai' ? 'deepseek' : 'openai'
+                      : settings.ai_fallback_provider;
+                    const patch = {
+                      ai_primary_provider: value,
+                      ai_fallback_provider: fallback,
+                    } as const;
+
+                    setSettings(prev => ({ ...prev, ...patch }));
+                    saveSettingsPatch(patch, "AI provider saved");
                   }}
                 >
                   <SelectTrigger className="rounded-xl mt-1">
@@ -396,10 +467,16 @@ export default function AdminSettings() {
                 <Select
                   value={settings.ai_fallback_provider}
                   onValueChange={(value: "openai" | "deepseek") => {
-                    updateSetting('ai_fallback_provider', value);
-                    if (value === settings.ai_primary_provider) {
-                      updateSetting('ai_primary_provider', value === 'openai' ? 'deepseek' : 'openai');
-                    }
+                    const primary = value === settings.ai_primary_provider
+                      ? value === 'openai' ? 'deepseek' : 'openai'
+                      : settings.ai_primary_provider;
+                    const patch = {
+                      ai_primary_provider: primary,
+                      ai_fallback_provider: value,
+                    } as const;
+
+                    setSettings(prev => ({ ...prev, ...patch }));
+                    saveSettingsPatch(patch, "AI provider saved");
                   }}
                 >
                   <SelectTrigger className="rounded-xl mt-1">

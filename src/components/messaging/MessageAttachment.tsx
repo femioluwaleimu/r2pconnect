@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { FileIcon, ImageIcon, Download, Loader2, ExternalLink } from "lucide-react";
@@ -68,10 +68,15 @@ export function MessageAttachment({
     }
   };
 
-  // Auto-load images
-  if (isImage && !imageUrl) {
-    handleViewImage();
-  }
+  useEffect(() => {
+    setImageUrl(null);
+  }, [attachmentUrl]);
+
+  useEffect(() => {
+    if (isImage && !imageUrl) {
+      handleViewImage();
+    }
+  }, [isImage, imageUrl, attachmentUrl]);
 
   return (
     <div className="mt-2">

@@ -82,7 +82,13 @@ export default function SupervisorStudentDetail() {
   const fetchStudentDetails = async (supervisorId: string, studentId: string) => {
     setLoading(true);
 
-    // First verify this student is assigned to this supervisor
+    // Fetch student profile first. Students can be assigned before they submit research.
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("user_id, full_name, avatar_url, email, department, level, matric_number, created_at, assigned_supervisor_id")
+      .eq("user_id", studentId)
+      .maybeSingle();
+
     const { data: papers } = await supabase
       .from("research_papers")
       .select("id, title, research_field, status, supervisor_approval_status, created_at, year_completed")
@@ -91,23 +97,18 @@ export default function SupervisorStudentDetail() {
       .eq("research_type", "student")
       .order("created_at", { ascending: false });
 
-    if (!papers || papers.length === 0) {
-      navigate("/supervisor/students");
+    const hasAssignedProfile = profile?.assigned_supervisor_id === supervisorId;
+    const hasSupervisedResearch = !!papers?.length;
+
+    if (!profile || (!hasAssignedProfile && !hasSupervisedResearch)) {
+      setStudent(null);
+      setResearchPapers([]);
+      setLoading(false);
       return;
     }
 
-    setResearchPapers(papers);
-
-    // Fetch student profile
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("user_id, full_name, avatar_url, email, department, level, matric_number, created_at")
-      .eq("user_id", studentId)
-      .maybeSingle();
-
-    if (profile) {
-      setStudent(profile);
-    }
+    setResearchPapers(papers || []);
+    setStudent(profile);
 
     setLoading(false);
   };
@@ -306,7 +307,11 @@ export default function SupervisorStudentDetail() {
           <CardContent>
             {/* Mobile view */}
             <div className="sm:hidden space-y-4">
-              {researchPapers.map((paper) => (
+              {researchPapers.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">
+                  This student has not submitted any research yet.
+                </p>
+              ) : researchPapers.map((paper) => (
                 <Card key={paper.id} className="rounded-xl border shadow-sm">
                   <CardContent className="p-4 space-y-3">
                     <div>
@@ -334,39 +339,45 @@ export default function SupervisorStudentDetail() {
 
             {/* Desktop view */}
             <div className="hidden sm:block overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Field</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Submitted</TableHead>
-                    <TableHead className="text-right">Action</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {researchPapers.map((paper) => (
-                    <TableRow key={paper.id}>
-                      <TableCell className="font-medium max-w-xs truncate">
-                        {paper.title}
-                      </TableCell>
-                      <TableCell>{paper.research_field || "-"}</TableCell>
-                      <TableCell>{getStatusBadge(paper.supervisor_approval_status)}</TableCell>
-                      <TableCell>
-                        {format(new Date(paper.created_at), "MMM d, yyyy")}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Link to={`/supervisor/research/${paper.id}`}>
-                          <Button variant="outline" size="sm" className="rounded-lg">
-                            <Eye className="w-4 h-4 mr-1" />
-                            View
-                          </Button>
-                        </Link>
-                      </TableCell>
+              {researchPapers.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">
+                  This student has not submitted any research yet.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Title</TableHead>
+                      <TableHead>Field</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Submitted</TableHead>
+                      <TableHead className="text-right">Action</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {researchPapers.map((paper) => (
+                      <TableRow key={paper.id}>
+                        <TableCell className="font-medium max-w-xs truncate">
+                          {paper.title}
+                        </TableCell>
+                        <TableCell>{paper.research_field || "-"}</TableCell>
+                        <TableCell>{getStatusBadge(paper.supervisor_approval_status)}</TableCell>
+                        <TableCell>
+                          {format(new Date(paper.created_at), "MMM d, yyyy")}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Link to={`/supervisor/research/${paper.id}`}>
+                            <Button variant="outline" size="sm" className="rounded-lg">
+                              <Eye className="w-4 h-4 mr-1" />
+                              View
+                            </Button>
+                          </Link>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
             </div>
           </CardContent>
         </Card>

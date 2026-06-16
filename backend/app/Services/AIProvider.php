@@ -37,8 +37,8 @@ class AIProvider {
 
     private function providerOrder(): array {
         $settings = $this->settings(['ai_primary_provider', 'ai_fallback_provider']);
-        $primary = $this->normalizeProvider($settings['ai_primary_provider'] ?? env('AI_PRIMARY_PROVIDER', 'openai'));
-        $fallback = $this->normalizeProvider($settings['ai_fallback_provider'] ?? env('AI_FALLBACK_PROVIDER', 'deepseek'));
+        $primary = $this->normalizeProvider($settings['ai_primary_provider'] ?? env('AI_PRIMARY_PROVIDER', 'deepseek'));
+        $fallback = $this->normalizeProvider($settings['ai_fallback_provider'] ?? env('AI_FALLBACK_PROVIDER', 'openai'));
 
         return array_values(array_unique(array_filter([$primary, $fallback])));
     }

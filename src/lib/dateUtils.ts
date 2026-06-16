@@ -2,12 +2,28 @@ import { format, formatDistanceToNow } from "date-fns";
 
 const LAGOS_TIMEZONE = "Africa/Lagos";
 
+function parseDate(date: string | Date): Date {
+  if (date instanceof Date) {
+    return date;
+  }
+
+  const trimmed = date.trim();
+  if (!trimmed || trimmed.startsWith("0000-00-00")) {
+    return new Date(NaN);
+  }
+
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(trimmed)) {
+    return new Date(trimmed.replace(" ", "T"));
+  }
+
+  return new Date(trimmed);
+}
+
 /**
  * Convert a date string or Date to a Date object adjusted for Lagos/Nigeria timezone display.
  */
 export function toLagosDate(date: string | Date): Date {
-  const d = typeof date === "string" ? new Date(date) : date;
-  return d;
+  return parseDate(date);
 }
 
 /**
@@ -18,7 +34,10 @@ export function formatLagos(
   date: string | Date,
   formatStr?: string
 ): string {
-  const d = typeof date === "string" ? new Date(date) : date;
+  const d = parseDate(date);
+  if (!(d instanceof Date) || isNaN(d.getTime())) {
+    return "Unknown date";
+  }
 
   if (formatStr === "relative") {
     // For relative time, use formatDistanceToNow (approximate, acceptable)
@@ -81,6 +100,9 @@ export function formatLagos(
  * Format relative time from now (e.g., "2 hours ago").
  */
 export function formatLagosRelative(date: string | Date): string {
-  const d = typeof date === "string" ? new Date(date) : date;
+  const d = parseDate(date);
+  if (!(d instanceof Date) || isNaN(d.getTime())) {
+    return "Unknown date";
+  }
   return formatDistanceToNow(d, { addSuffix: true });
 }

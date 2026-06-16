@@ -7,6 +7,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } f
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from "recharts";
 import { format, subMonths, startOfMonth, endOfMonth } from "date-fns";
 import { formatLagos } from "@/lib/dateUtils";
+import { formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 interface MonthlyData {
   month: string;
@@ -71,8 +72,8 @@ export default function AdminAnalytics() {
       setResearchThisMonth(researchThisMonthRes.count || 0);
       setTotalInstitutions(institutionsRes.count || 0);
 
-      const totalRev = (paymentsRes.data || []).reduce((sum, p) => sum + (p.amount || 0), 0);
-      const monthRev = (paymentsThisMonthRes.data || []).reduce((sum, p) => sum + (p.amount || 0), 0);
+      const totalRev = (paymentsRes.data || []).reduce((sum, p) => sum + toNumber(p.amount), 0);
+      const monthRev = (paymentsThisMonthRes.data || []).reduce((sum, p) => sum + toNumber(p.amount), 0);
       setTotalRevenue(totalRev);
       setRevenueThisMonth(monthRev);
 
@@ -108,7 +109,7 @@ export default function AdminAnalytics() {
     { icon: Users, label: "Total Users", value: totalUsers.toLocaleString(), subtitle: `+${usersThisMonth} this month`, color: "bg-blue-500/10", textColor: "text-blue-500" },
     { icon: FileText, label: "Research Papers", value: totalResearch.toLocaleString(), subtitle: `+${researchThisMonth} this month`, color: "bg-emerald-500/10", textColor: "text-emerald-500" },
     { icon: Building2, label: "Institutions", value: totalInstitutions.toLocaleString(), subtitle: "registered", color: "bg-amber-500/10", textColor: "text-amber-500" },
-    { icon: DollarSign, label: "Total Revenue", value: `₦${totalRevenue.toLocaleString()}`, subtitle: `₦${revenueThisMonth.toLocaleString()} this month`, color: "bg-violet-500/10", textColor: "text-violet-500" },
+    { icon: DollarSign, label: "Total Revenue", value: formatCurrencyAmount(totalRevenue), subtitle: `${formatCurrencyAmount(revenueThisMonth)} this month`, color: "bg-violet-500/10", textColor: "text-violet-500" },
   ];
 
   return (

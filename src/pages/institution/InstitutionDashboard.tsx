@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@/integrations/supabase/client";
 import InstitutionLayout from "@/components/layout/InstitutionLayout";
@@ -73,6 +73,7 @@ export default function InstitutionDashboard() {
   const [recentPapers, setRecentPapers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -81,23 +82,52 @@ export default function InstitutionDashboard() {
         return;
       }
       setUser(user);
-      fetchStats(user.id);
-      fetchRecentPapers(user.id);
+      fetchDashboardData(user.id);
     });
-  }, [navigate]);
+  }, [navigate, searchParams]);
 
-  const fetchStats = async (userId: string) => {
+  const getInstitutionForAccess = async (userId: string) => {
+    const requestedInstitutionId = searchParams.get("institution_id");
+    const { data: role } = await supabase
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (role?.role === "admin" && requestedInstitutionId) {
+      const { data: institution } = await supabase
+        .from("institutions")
+        .select("id, total_commission")
+        .eq("id", requestedInstitutionId)
+        .maybeSingle();
+      return institution;
+    }
+
     const { data: institution } = await supabase
       .from('institutions')
       .select('id, total_commission')
       .eq('admin_user_id', userId)
       .maybeSingle();
+    return institution;
+  };
+
+  const fetchDashboardData = async (userId: string) => {
+    setLoading(true);
+    const institution = await getInstitutionForAccess(userId);
 
     if (!institution) {
+      setRecentPapers([]);
       setLoading(false);
       return;
     }
 
+    await Promise.all([
+      fetchStats(institution),
+      fetchRecentPapers(institution.id),
+    ]);
+  };
+
+  const fetchStats = async (institution: { id: string; total_commission: number | null }) => {
     const { count: researcherCount } = await supabase
       .from('profiles')
       .select('*', { count: 'exact', head: true })
@@ -124,20 +154,12 @@ export default function InstitutionDashboard() {
     setLoading(false);
   };
 
-  const fetchRecentPapers = async (userId: string) => {
-    const { data: institution } = await supabase
-      .from('institutions')
-      .select('id')
-      .eq('admin_user_id', userId)
-      .maybeSingle();
-
-    if (!institution) return;
-
+  const fetchRecentPapers = async (institutionId: string) => {
     // Fetch papers pending review: status = 'under_review' AND research_stage = 'completed'
     const { data: papers } = await supabase
       .from('research_papers')
       .select('id, title, status, research_stage, created_at, author_id')
-      .eq('institution_id', institution.id)
+      .eq('institution_id', institutionId)
       .eq('status', 'under_review')
       .eq('research_stage', 'completed')
       .order('created_at', { ascending: false })

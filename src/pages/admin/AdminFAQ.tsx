@@ -69,7 +69,7 @@ export default function AdminFAQ() {
         if (error) throw error;
         toast({ title: "FAQ updated" });
       } else {
-        const { error } = await supabase.from("faq").insert(formData);
+        const { error } = await supabase.from("faq").insert({ id: crypto.randomUUID(), ...formData });
         if (error) throw error;
         toast({ title: "FAQ created" });
       }

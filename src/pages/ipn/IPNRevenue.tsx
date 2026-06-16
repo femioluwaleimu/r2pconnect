@@ -10,6 +10,7 @@ import { Wallet, ArrowDownToLine, Loader2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { formatLagos } from "@/lib/dateUtils";
+import { formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 export default function IPNRevenue() {
   const [wallet, setWallet] = useState<{ balance: number; total_earned: number; total_withdrawn: number } | null>(null);
@@ -31,9 +32,20 @@ export default function IPNRevenue() {
       supabase.from("ipn_payments").select("*, ipn_opportunities(title)").eq("status", "success").order("created_at", { ascending: false }).limit(20),
       supabase.from("ipn_payout_requests").select("*").eq("user_id", user.id).order("created_at", { ascending: false }),
     ]);
-    setWallet(walletRes.data);
-    setPayments(paymentsRes.data || []);
-    setPayouts(payoutsRes.data || []);
+    setWallet(walletRes.data ? {
+      ...walletRes.data,
+      balance: toNumber(walletRes.data.balance),
+      total_earned: toNumber(walletRes.data.total_earned),
+      total_withdrawn: toNumber(walletRes.data.total_withdrawn),
+    } : null);
+    setPayments((paymentsRes.data || []).map((payment) => ({
+      ...payment,
+      amount: toNumber(payment.amount),
+    })));
+    setPayouts((payoutsRes.data || []).map((payout) => ({
+      ...payout,
+      amount: toNumber(payout.amount),
+    })));
     setLoading(false);
   };
 
@@ -86,7 +98,7 @@ export default function IPNRevenue() {
             <DialogContent>
               <DialogHeader><DialogTitle>Request Withdrawal</DialogTitle></DialogHeader>
               <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">Available: ₦{(wallet?.balance || 0).toLocaleString()}</p>
+                <p className="text-sm text-muted-foreground">Available: {formatCurrencyAmount(wallet?.balance)}</p>
                 <div className="space-y-2"><Label>Amount (₦)</Label><Input type="number" value={withdrawForm.amount} onChange={(e) => setWithdrawForm(p => ({ ...p, amount: e.target.value }))} className="rounded-xl" /></div>
                 <div className="space-y-2"><Label>Bank Name</Label><Input value={withdrawForm.bank_name} onChange={(e) => setWithdrawForm(p => ({ ...p, bank_name: e.target.value }))} className="rounded-xl" /></div>
                 <div className="space-y-2"><Label>Account Number</Label><Input value={withdrawForm.account_number} onChange={(e) => setWithdrawForm(p => ({ ...p, account_number: e.target.value }))} className="rounded-xl" /></div>
@@ -110,7 +122,7 @@ export default function IPNRevenue() {
                 <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${s.color} flex items-center justify-center shadow-lg mb-3`}>
                   <Wallet className="w-5 h-5 text-white" />
                 </div>
-                <p className="text-2xl font-bold text-foreground">₦{s.value.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-foreground">{formatCurrencyAmount(s.value)}</p>
                 <p className="text-sm text-muted-foreground">{s.label}</p>
               </CardContent>
             </Card>
@@ -125,7 +137,7 @@ export default function IPNRevenue() {
                 {payouts.map((p: any) => (
                   <div key={p.id} className="flex items-center justify-between p-3 rounded-xl border">
                     <div>
-                      <p className="font-medium">₦{p.amount.toLocaleString()}</p>
+                      <p className="font-medium">{formatCurrencyAmount(p.amount)}</p>
                       <p className="text-xs text-muted-foreground">{p.bank_name} • {p.account_number}</p>
                       <p className="text-xs text-muted-foreground">{formatLagos(p.created_at)}</p>
                     </div>

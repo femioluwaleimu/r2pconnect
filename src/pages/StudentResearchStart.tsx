@@ -53,6 +53,33 @@ interface Supervisor {
   department: string | null;
   isExternal?: boolean;
 }
+
+const isDatabaseQueryError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String((error as any)?.message || error || "");
+  return message.includes("Database query failed") || message.includes("Database query error");
+};
+
+const createUuid = () => {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return cryptoApi.randomUUID();
+  }
+
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const rand = Math.floor(Math.random() * 16);
+    const value = char === "x" ? rand : (rand & 0x3) | 0x8;
+    return value.toString(16);
+  });
+};
+
 export default function StudentResearchStart() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(false);
@@ -164,19 +191,30 @@ export default function StudentResearchStart() {
 
   const fetchInvitedSupervisors = async (userId: string) => {
     try {
-      const { data: invites } = await supabase
+      const { data: invites, error: invitesError } = await supabase
         .from('external_supervisor_invites')
         .select('email, full_name, department')
         .eq('student_id', userId)
         .eq('status', 'accepted');
 
+      if (invitesError) {
+        if (isDatabaseQueryError(invitesError)) {
+          console.warn('External supervisor invites are not available in this database yet.');
+          setInvitedSupervisors([]);
+          return;
+        }
+        throw invitesError;
+      }
+
       if (!invites || invites.length === 0) return;
 
       const emails = invites.map(i => i.email);
-      const { data: profiles } = await supabase
+      const { data: profiles, error: profilesError } = await supabase
         .from('profiles')
         .select('user_id, full_name, email, department')
         .in('email', emails);
+
+      if (profilesError) throw profilesError;
 
       if (profiles && profiles.length > 0) {
         const list: Supervisor[] = profiles.map(p => ({
@@ -409,6 +447,7 @@ export default function StudentResearchStart() {
         data: insertedPaper,
         error
       } = await supabase.from('research_papers').insert({
+        id: createUuid(),
         title: formData.title,
         abstract: formData.abstract,
         ai_summary: formData.aiSummary || null,

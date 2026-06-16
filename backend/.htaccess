@@ -1,0 +1,16 @@
+Options -Indexes
+DirectoryIndex index.php
+
+<FilesMatch "^(\.env|\.env\..*|\.gitignore|README\.md|setup_database\.php|bootstrap\.php)$">
+  Require all denied
+</FilesMatch>
+
+<FilesMatch "\.(sql|log|bak|zip)$">
+  Require all denied
+</FilesMatch>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+
+  RewriteRule ^(app|config|database|logs|middleware|scripts|storage|utils)(/|$) - [F,L]
+</IfModule>

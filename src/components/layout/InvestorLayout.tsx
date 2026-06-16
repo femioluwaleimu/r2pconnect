@@ -6,7 +6,7 @@ import type { User, Session } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
-import { usePlatformSettings } from "@/hooks/usePlatformSettings";
+import AppLogo from "./AppLogo";
 import {
   Play,
   LayoutDashboard,
@@ -50,8 +50,6 @@ export default function InvestorLayout({ children }: InvestorLayoutProps) {
   const location = useLocation();
   const { toast } = useToast();
   const { theme, setTheme } = useTheme();
-  const { platformLogo } = usePlatformSettings();
-
   useEffect(() => {
     const {
       data: { subscription },
@@ -105,17 +103,7 @@ export default function InvestorLayout({ children }: InvestorLayoutProps) {
         {/* Logo */}
         <div className="p-4 border-b border-border">
           <Link to="/" className="flex items-center gap-2">
-            {platformLogo ? (
-              <img src={platformLogo} alt="Logo" className="w-10 h-10 rounded-2xl object-contain" />
-            ) : (
-              <div className="w-10 h-10 rounded-xl gradient-hero flex items-center justify-center shadow-lg overflow-hidden">
-                <img
-                  src="/placeholder.svg"
-                  alt="Logo"
-                  className="w-full h-full object-cover"
-                />
-              </div>
-            )}
+            <AppLogo className="w-10 h-10 rounded-2xl" />
             <div>
               <span className="font-bold text-lg text-foreground">R2P CONNECT</span>
               <span className="block text-xs text-primary">Investor Portal</span>

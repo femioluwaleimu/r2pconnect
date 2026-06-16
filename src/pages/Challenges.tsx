@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { InfoCard } from "@/components/ui/info-card";
 import { Trophy, Search, DollarSign, Calendar, Lightbulb, ArrowRight } from "lucide-react";
 import { formatLagos } from "@/lib/dateUtils";
+import { formatAmount, toNumber } from "@/lib/numberFormat";
 interface Challenge {
   id: string;
   title: string;
@@ -41,8 +42,12 @@ export default function Challenges() {
       ascending: false
     });
     if (data) {
-      setChallenges(data);
-      setFilteredChallenges(data);
+      const normalized = data.map((challenge) => ({
+        ...challenge,
+        reward_amount: challenge.reward_amount == null ? null : toNumber(challenge.reward_amount),
+      }));
+      setChallenges(normalized);
+      setFilteredChallenges(normalized);
     }
     setLoading(false);
   };
@@ -106,7 +111,7 @@ export default function Challenges() {
                         <div className="flex items-center gap-4 text-sm">
                           <span className="flex items-center gap-1 font-medium text-primary">
                             <DollarSign className="w-4 h-4" />
-                            {challenge.reward_currency === 'NGN' ? '₦' : '$'}{challenge.reward_amount?.toLocaleString()}
+                            {challenge.reward_currency === 'NGN' ? '₦' : '$'}{formatAmount(challenge.reward_amount)}
                           </span>
                           {challenge.deadline && (
                             <span className={`flex items-center gap-1 ${isExpired ? 'text-destructive' : 'text-muted-foreground'}`}>

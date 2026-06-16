@@ -3,6 +3,7 @@ import IndustryLayout from "@/components/layout/IndustryLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { BarChart3, TrendingUp, Users, Trophy, Info, FileText, Loader2, Sparkles } from "lucide-react";
+import { formatRating } from "@/lib/numberFormat";
 
 interface AnalyticsData {
   totalChallenges: number;
@@ -229,7 +230,7 @@ export default function IndustryAnalytics() {
                     <span className="text-sm text-muted-foreground">Avg Submissions/Challenge</span>
                     <span className="font-semibold">
                       {analytics.totalChallenges > 0 
-                        ? (analytics.totalSubmissions / analytics.totalChallenges).toFixed(1) 
+                        ? formatRating(analytics.totalSubmissions / analytics.totalChallenges) 
                         : 0}
                     </span>
                   </div>

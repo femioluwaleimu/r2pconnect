@@ -20,6 +20,7 @@ import {
   Building2,
   MapPin
 } from "lucide-react";
+import { formatAmount, toNumber } from "@/lib/numberFormat";
 
 interface Challenge {
   id: string;
@@ -79,7 +80,10 @@ export default function ChallengeDetails() {
       return;
     }
 
-    setChallenge(data);
+    setChallenge({
+      ...data,
+      reward_amount: data.reward_amount == null ? null : toNumber(data.reward_amount),
+    });
 
     // Fetch industry profile
     const { data: profile } = await supabase
@@ -229,7 +233,7 @@ export default function ChallengeDetails() {
               <div>
                 <p className="text-lg md:text-2xl font-bold text-foreground">
                   {challenge.reward_currency === 'NGN' ? '₦' : '$'}
-                  {challenge.reward_amount?.toLocaleString() || '0'}
+                  {formatAmount(challenge.reward_amount)}
                 </p>
                 <p className="text-xs md:text-sm text-muted-foreground">Reward</p>
               </div>

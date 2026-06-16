@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ArrowRight, Sparkles, FileText, Film, Banknote } from "lucide-react";
 import type { PublicPaper } from "./ResearchResultCard";
+import { formatCurrencyAmount } from "@/lib/numberFormat";
 
 interface Props {
   paper: PublicPaper | null;
@@ -81,7 +82,7 @@ export default function ResearchPreviewModal({ paper, open, onOpenChange }: Prop
               <Section title="Funding">
                 <span className="inline-flex items-center gap-1.5 text-amber-700">
                   <Banknote className="w-4 h-4" />
-                  Researcher is seeking funding{paper.funding_required ? ` (₦${paper.funding_required.toLocaleString()})` : ""}
+                  Researcher is seeking funding{paper.funding_required ? ` (${formatCurrencyAmount(paper.funding_required)})` : ""}
                 </span>
               </Section>
             )}

@@ -64,6 +64,48 @@ const EMPTY_PRESET: Preset = {
   preferred_methodology: "",
 };
 
+const parseStringList = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || "").trim()).filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item || "").trim()).filter(Boolean);
+      }
+    } catch {
+      // Fall through to delimiter parsing for older/plain-text values.
+    }
+
+    return trimmed
+      .split(/\r?\n|;/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
+const normalizePreset = (preset: Partial<Preset> | null | undefined): Preset => ({
+  ...EMPTY_PRESET,
+  ...(preset || {}),
+  description: preset?.description || "",
+  is_default: Boolean(preset?.is_default),
+  is_active: preset?.is_active !== false && preset?.is_active !== 0,
+  focus_areas: parseStringList(preset?.focus_areas),
+  do_rules: parseStringList(preset?.do_rules),
+  dont_rules: parseStringList(preset?.dont_rules),
+  custom_guidance: String(preset?.custom_guidance || ""),
+  example_feedback: String(preset?.example_feedback || ""),
+  research_field: String(preset?.research_field || ""),
+  preferred_methodology: String(preset?.preferred_methodology || ""),
+});
+
 function ChipInput({
   value, onChange, placeholder,
 }: { value: string[]; onChange: (v: string[]) => void; placeholder: string }) {
@@ -344,7 +386,7 @@ export default function SupervisorAITraining() {
       supabase.from("profiles").select("user_id").eq("assigned_supervisor_id", uid),
     ]);
 
-    setPresets((ps as any) || []);
+    setPresets(((ps as any) || []).map(normalizePreset));
     setAssignments((as as any) || []);
 
     const studentIds = new Set<string>([
@@ -376,8 +418,8 @@ export default function SupervisorAITraining() {
     })();
   }, []);
 
-  const openCreate = () => { setEditing(EMPTY_PRESET); setEditorOpen(true); };
-  const openEdit = (p: Preset) => { setEditing({ ...EMPTY_PRESET, ...p }); setEditorOpen(true); };
+  const openCreate = () => { setEditing({ ...EMPTY_PRESET }); setEditorOpen(true); };
+  const openEdit = (p: Preset) => { setEditing(normalizePreset(p)); setEditorOpen(true); };
 
   const savePreset = async () => {
     if (!userId) return;
@@ -396,13 +438,13 @@ export default function SupervisorAITraining() {
         tone: editing.tone,
         strictness: editing.strictness,
         citation_style: editing.citation_style,
-        focus_areas: editing.focus_areas,
-        do_rules: editing.do_rules,
-        dont_rules: editing.dont_rules,
-        custom_guidance: editing.custom_guidance.trim() || null,
-        example_feedback: editing.example_feedback.trim() || null,
-        research_field: editing.research_field.trim() || null,
-        preferred_methodology: editing.preferred_methodology.trim() || null,
+        focus_areas: parseStringList(editing.focus_areas),
+        do_rules: parseStringList(editing.do_rules),
+        dont_rules: parseStringList(editing.dont_rules),
+        custom_guidance: String(editing.custom_guidance || "").trim() || null,
+        example_feedback: String(editing.example_feedback || "").trim() || null,
+        research_field: String(editing.research_field || "").trim() || null,
+        preferred_methodology: String(editing.preferred_methodology || "").trim() || null,
       };
 
       // Only one default at a time

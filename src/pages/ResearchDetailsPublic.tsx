@@ -49,6 +49,7 @@ interface ResearchPaper {
   industry_tags: string[] | null;
   research_field: string | null;
   research_stage: string | null;
+  research_type: string | null;
   author_id: string;
   supervisor_id: string | null;
   institution_id: string | null;
@@ -88,6 +89,38 @@ interface ParsedAISummary {
   solution: string;
   application: string;
 }
+
+const toStringArray = (value: unknown): string[] | null => {
+  if (Array.isArray(value)) {
+    const items = value.map((item) => String(item).trim()).filter(Boolean);
+    return items.length > 0 ? items : null;
+  }
+
+  if (typeof value !== "string") return null;
+
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      const items = parsed.map((item) => String(item).trim()).filter(Boolean);
+      return items.length > 0 ? items : null;
+    }
+  } catch {
+    // Some imported records store list fields as plain comma-separated text.
+  }
+
+  const items = trimmed.split(",").map((item) => item.trim()).filter(Boolean);
+  return items.length > 0 ? items : null;
+};
+
+const normalizePaper = (paper: any): ResearchPaper => ({
+  ...paper,
+  keywords: toStringArray(paper?.keywords),
+  industry_tags: toStringArray(paper?.industry_tags),
+  author_names: toStringArray(paper?.author_names),
+});
 
 function parseAISummary(summary: string | null): ParsedAISummary | null {
   if (!summary) return null;
@@ -162,86 +195,94 @@ export default function ResearchDetailsPublic() {
 
   const fetchPaper = async () => {
     setLoading(true);
-    
-    const { data: paperData, error: paperError } = await supabase
-      .from('research_papers')
-      .select('*')
-      .eq('id', id)
-      .eq('status', 'published')
-      .maybeSingle();
 
-    if (paperError || !paperData) {
-      setLoading(false);
-      return;
-    }
-
-    setPaper(paperData);
-    
     try {
-      await supabase.functions.invoke('track-research-view', {
-        body: { research_id: id, action: 'view' }
-      });
-    } catch (e) {
-      console.error('Failed to track view:', e);
-    }
+      const { data: paperData, error: paperError } = await supabase
+        .from('research_papers')
+        .select('*')
+        .eq('id', id)
+        .eq('status', 'published')
+        .maybeSingle();
 
-    const { data: authorData } = await supabase
-      .from('public_profiles')
-      .select('full_name, avatar_url, institution_id')
-      .eq('user_id', paperData.author_id)
-      .maybeSingle();
+      if (paperError || !paperData) {
+        return;
+      }
 
-    if (authorData) {
-      setAuthor(authorData);
+      const normalizedPaper = normalizePaper(paperData);
+      setPaper(normalizedPaper);
 
-      if (authorData.institution_id) {
-        const { data: instData } = await supabase
-          .from('institutions')
-          .select('id, name, logo_url, download_credit_cost')
-          .eq('id', authorData.institution_id)
-          .maybeSingle();
-        if (instData) {
-          // Override paper download_credit_cost with institution setting
-          if (instData.download_credit_cost !== null && instData.download_credit_cost !== undefined) {
-            setPaper(prev => prev ? { ...prev, download_credit_cost: instData.download_credit_cost } : prev);
+      try {
+        await supabase.functions.invoke('track-research-view', {
+          body: { research_id: id, action: 'view' }
+        });
+      } catch (e) {
+        console.error('Failed to track view:', e);
+      }
+
+      const { data: authorData } = await supabase
+        .from('public_profiles')
+        .select('full_name, avatar_url, institution_id')
+        .eq('user_id', normalizedPaper.author_id)
+        .maybeSingle();
+
+      if (authorData) {
+        setAuthor(authorData);
+
+        if (authorData.institution_id) {
+          const { data: instData } = await supabase
+            .from('institutions')
+            .select('id, name, logo_url, download_credit_cost')
+            .eq('id', authorData.institution_id)
+            .maybeSingle();
+          if (instData) {
+            // Student research uses institution pricing; completed research keeps the author's own price.
+            if (
+              normalizedPaper.research_type === "student" &&
+              instData.download_credit_cost !== null &&
+              instData.download_credit_cost !== undefined
+            ) {
+              setPaper(prev => prev ? { ...prev, download_credit_cost: instData.download_credit_cost } : prev);
+            }
+            setInstitution(instData);
           }
-          setInstitution(instData);
         }
       }
-    }
 
-    // Fetch supervisor name
-    if (paperData.supervisor_id) {
-      const { data: supProfile } = await supabase
-        .from('public_profiles')
-        .select('full_name')
-        .eq('user_id', paperData.supervisor_id)
+      // Fetch supervisor name
+      if (normalizedPaper.supervisor_id) {
+        const { data: supProfile } = await supabase
+          .from('public_profiles')
+          .select('full_name')
+          .eq('user_id', normalizedPaper.supervisor_id)
+          .maybeSingle();
+        if (supProfile) setSupervisorName(supProfile.full_name);
+      }
+
+      // Fetch department
+      if ((normalizedPaper as any).department_id) {
+        const { data: deptData } = await supabase
+          .from('departments')
+          .select('name')
+          .eq('id', (normalizedPaper as any).department_id)
+          .maybeSingle();
+        if (deptData) setDepartment(deptData.name);
+      }
+
+      const { data: docData } = await supabase
+        .from('documentaries')
+        .select('*')
+        .eq('researcher_id', normalizedPaper.author_id)
+        .limit(1)
         .maybeSingle();
-      if (supProfile) setSupervisorName(supProfile.full_name);
+
+      if (docData) {
+        setDocumentary(docData);
+      }
+    } catch (error) {
+      console.error('Error fetching public research details:', error);
+    } finally {
+      setLoading(false);
     }
-
-    // Fetch department
-    if (paperData.department_id) {
-      const { data: deptData } = await supabase
-        .from('departments')
-        .select('name')
-        .eq('id', paperData.department_id)
-        .maybeSingle();
-      if (deptData) setDepartment(deptData.name);
-    }
-
-    const { data: docData } = await supabase
-      .from('documentaries')
-      .select('*')
-      .eq('researcher_id', paperData.author_id)
-      .limit(1)
-      .maybeSingle();
-
-    if (docData) {
-      setDocumentary(docData);
-    }
-
-    setLoading(false);
   };
 
   const handleDownloadClick = () => {

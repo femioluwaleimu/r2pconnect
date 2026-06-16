@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@/integrations/supabase/client";
+import { prepareAvatarImage } from "@/lib/avatarImage";
 import SupervisorLayout from "@/components/layout/SupervisorLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { formatLagos } from "@/lib/dateUtils";
 import {
@@ -28,12 +30,25 @@ import {
   FileText,
   ShieldCheck,
   Sparkles,
+  Shield,
+  KeyRound,
+  Eye,
+  EyeOff,
+  IdCard,
+  Award,
 } from "lucide-react";
 
 export default function SupervisorProfile() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [oldPassword, setOldPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showOldPassword, setShowOldPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
   const [profile, setProfile] = useState({
     full_name: "",
     email: "",
@@ -44,6 +59,11 @@ export default function SupervisorProfile() {
     created_at: "",
     is_verified: false,
     fields_of_interest: [] as string[],
+  });
+  const [supervisorDetails, setSupervisorDetails] = useState({
+    id: "",
+    academic_rank: "",
+    staff_id: "",
   });
   const [institution, setInstitution] = useState<string>("");
   const [stats, setStats] = useState({ students: 0, pending: 0, approved: 0, total: 0 });
@@ -92,6 +112,20 @@ export default function SupervisorProfile() {
         if (instData) setInstitution(instData.name);
       }
     }
+
+    const { data: supervisorData } = await supabase
+      .from("supervisors")
+      .select("id, academic_rank, staff_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    if (supervisorData) {
+      setSupervisorDetails({
+        id: supervisorData.id || "",
+        academic_rank: supervisorData.academic_rank || "",
+        staff_id: supervisorData.staff_id || "",
+      });
+    }
     setLoading(false);
   };
 
@@ -134,6 +168,50 @@ export default function SupervisorProfile() {
         })
         .eq("user_id", user.id);
       if (error) throw error;
+
+      const supervisorPayload = {
+        academic_rank: supervisorDetails.academic_rank.trim() || null,
+        staff_id: supervisorDetails.staff_id.trim() || null,
+        department: profile.department.trim() || null,
+      };
+
+      if (supervisorDetails.id) {
+        const { error: supervisorError } = await supabase
+          .from("supervisors")
+          .update(supervisorPayload)
+          .eq("id", supervisorDetails.id);
+        if (supervisorError) throw supervisorError;
+      } else {
+        const { data: existingSupervisor } = await supabase
+          .from("supervisors")
+          .select("id")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (existingSupervisor?.id) {
+          const { error: supervisorError } = await supabase
+            .from("supervisors")
+            .update(supervisorPayload)
+            .eq("id", existingSupervisor.id);
+          if (supervisorError) throw supervisorError;
+          setSupervisorDetails((current) => ({ ...current, id: existingSupervisor.id }));
+        } else {
+          const { data: createdSupervisor, error: supervisorError } = await supabase
+            .from("supervisors")
+            .insert({
+              id: crypto.randomUUID(),
+              user_id: user.id,
+              ...supervisorPayload,
+            })
+            .select("id")
+            .maybeSingle();
+          if (supervisorError) throw supervisorError;
+          if (createdSupervisor?.id) {
+            setSupervisorDetails((current) => ({ ...current, id: createdSupervisor.id }));
+          }
+        }
+      }
+
       toast({ title: "Profile updated successfully" });
     } catch (error: any) {
       toast({ title: "Error updating profile", description: error.message, variant: "destructive" });
@@ -146,19 +224,63 @@ export default function SupervisorProfile() {
     const file = e.target.files?.[0];
     if (!file || !user) return;
     try {
-      const fileExt = file.name.split(".").pop();
-      const filePath = `${user.id}/avatar.${fileExt}`;
+      const avatarFile = await prepareAvatarImage(file);
+      const filePath = `${user.id}/avatar.jpg`;
       const { error: uploadError } = await supabase.storage
         .from("avatars")
-        .upload(filePath, file, { upsert: true });
+        .upload(filePath, avatarFile, { upsert: true });
       if (uploadError) throw uploadError;
       const { data: urlData } = supabase.storage.from("avatars").getPublicUrl(filePath);
       const avatarUrl = `${urlData.publicUrl}?t=${Date.now()}`;
-      await supabase.from("profiles").update({ avatar_url: avatarUrl }).eq("user_id", user.id);
-      setProfile({ ...profile, avatar_url: avatarUrl });
+      const { data: updateData, error: updateError } = await supabase.from("profiles").update({ avatar_url: avatarUrl }).eq("user_id", user.id);
+      if (updateError) throw updateError;
+      if (updateData?.affected === 0) {
+        throw new Error("Profile row was not found, so the avatar could not be saved.");
+      }
+      setProfile((current) => ({ ...current, avatar_url: avatarUrl }));
       toast({ title: "Avatar updated!" });
     } catch (error: any) {
       toast({ title: "Error uploading avatar", description: error.message, variant: "destructive" });
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!user?.email) return;
+
+    if (!oldPassword || !newPassword || !confirmPassword) {
+      toast({ title: "Please fill in all password fields", variant: "destructive" });
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      toast({ title: "Password too short", description: "Password must be at least 8 characters", variant: "destructive" });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast({ title: "Passwords don't match", variant: "destructive" });
+      return;
+    }
+
+    setPasswordLoading(true);
+    try {
+      const { error } = await supabase.auth.updateUser({
+        currentPassword: oldPassword,
+        password: newPassword,
+      });
+      if (error) throw error;
+
+      toast({ title: "Password changed successfully" });
+      setPasswordDialogOpen(false);
+      setOldPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setShowOldPassword(false);
+      setShowNewPassword(false);
+    } catch (error: any) {
+      toast({ title: "Error changing password", description: error.message, variant: "destructive" });
+    } finally {
+      setPasswordLoading(false);
     }
   };
 
@@ -267,6 +389,8 @@ export default function SupervisorProfile() {
             <DetailRow icon={Phone} label="Phone" value={profile.phone_number || "—"} />
             <DetailRow icon={Building2} label="Institution" value={institution || "—"} />
             <DetailRow icon={GraduationCap} label="Department" value={profile.department || "—"} />
+            <DetailRow icon={Award} label="Academic Rank" value={supervisorDetails.academic_rank || "—"} />
+            <DetailRow icon={IdCard} label="Staff ID" value={supervisorDetails.staff_id || "—"} />
             <DetailRow icon={Calendar} label="Member since" value={profile.created_at ? formatLagos(profile.created_at, "date") : "—"} />
           </CardContent>
         </Card>
@@ -302,6 +426,18 @@ export default function SupervisorProfile() {
                   onChange={(e) => setProfile({ ...profile, department: e.target.value })}
                   placeholder="e.g., Computer Science" className="rounded-xl" />
               </div>
+              <div>
+                <Label htmlFor="academic_rank">Academic Rank</Label>
+                <Input id="academic_rank" value={supervisorDetails.academic_rank}
+                  onChange={(e) => setSupervisorDetails({ ...supervisorDetails, academic_rank: e.target.value })}
+                  placeholder="e.g., Senior Lecturer" className="rounded-xl" />
+              </div>
+              <div>
+                <Label htmlFor="staff_id">Staff ID</Label>
+                <Input id="staff_id" value={supervisorDetails.staff_id}
+                  onChange={(e) => setSupervisorDetails({ ...supervisorDetails, staff_id: e.target.value })}
+                  placeholder="Institution staff ID" className="rounded-xl" />
+              </div>
             </div>
 
             <div>
@@ -318,7 +454,99 @@ export default function SupervisorProfile() {
             </Button>
           </CardContent>
         </Card>
+
+        {/* Security */}
+        <Card className="rounded-2xl">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Shield className="w-5 h-5" /> Security
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="font-medium text-foreground">Password</p>
+              <p className="text-sm text-muted-foreground">Update your account password.</p>
+            </div>
+            <Button variant="outline" className="rounded-xl gap-2" onClick={() => setPasswordDialogOpen(true)}>
+              <KeyRound className="w-4 h-4" />
+              Change Password
+            </Button>
+          </CardContent>
+        </Card>
       </div>
+
+      <Dialog open={passwordDialogOpen} onOpenChange={setPasswordDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="w-5 h-5 text-primary" />
+              Change Password
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="currentPassword">Current Password</Label>
+              <div className="relative mt-1">
+                <Input
+                  id="currentPassword"
+                  type={showOldPassword ? "text" : "password"}
+                  value={oldPassword}
+                  onChange={(e) => setOldPassword(e.target.value)}
+                  placeholder="Enter current password"
+                  className="rounded-xl pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowOldPassword(!showOldPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                >
+                  {showOldPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="newPassword">New Password</Label>
+              <div className="relative mt-1">
+                <Input
+                  id="newPassword"
+                  type={showNewPassword ? "text" : "password"}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Enter new password"
+                  className="rounded-xl pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword(!showNewPassword)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                >
+                  {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="confirmPassword">Confirm New Password</Label>
+              <Input
+                id="confirmPassword"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                placeholder="Confirm new password"
+                className="rounded-xl mt-1"
+              />
+            </div>
+            <div className="flex gap-2 justify-end pt-2">
+              <Button variant="outline" onClick={() => setPasswordDialogOpen(false)} className="rounded-xl">
+                Cancel
+              </Button>
+              <Button onClick={handleChangePassword} disabled={passwordLoading} className="rounded-xl">
+                {passwordLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                Change Password
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </SupervisorLayout>
   );
 }

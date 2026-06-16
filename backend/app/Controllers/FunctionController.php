@@ -7,6 +7,9 @@ use App\Core\Response;
 use App\Services\AIProvider;
 
 class FunctionController extends Controller {
+    private const RESEARCHER_FREE_MONTHLY_CREDITS = 3;
+    private const REFERRAL_AI_CREDIT_BONUS = 5;
+
     private AIProvider $aiProvider;
 
     public function __construct() {
@@ -34,6 +37,22 @@ class FunctionController extends Controller {
                 $this->researchIntegrityCheck($payload);
                 return;
 
+            case 'track-research-view':
+                $this->trackResearchView($payload);
+                return;
+
+            case 'process-referral':
+                $this->processReferral($payload);
+                return;
+
+            case 'ensure-free-ai-credits':
+                $this->ensureFreeAICredits($payload);
+                return;
+
+            case 'ai-saved-responses':
+                $this->aiSavedResponses($payload);
+                return;
+
             case 'paystack':
                 $this->paystack($payload);
                 return;
@@ -48,6 +67,10 @@ class FunctionController extends Controller {
 
             case 'send-email':
                 $this->sendEmailFunction($payload);
+                return;
+
+            case 'notify-supervisor-registration':
+                $this->notifySupervisorRegistration($payload);
                 return;
 
             case 'send-verification-code':
@@ -72,6 +95,10 @@ class FunctionController extends Controller {
 
             case 'reset-password':
                 $this->resetPassword($payload);
+                return;
+
+            case 'department-lookup':
+                $this->departmentLookup($payload);
                 return;
 
             case 'validate-institution-code':
@@ -104,8 +131,408 @@ class FunctionController extends Controller {
         }
     }
 
+    private function trackResearchView(array $payload): void {
+        $researchId = trim((string)($payload['research_id'] ?? $payload['researchId'] ?? ''));
+        $action = strtolower(trim((string)($payload['action'] ?? 'view')));
+
+        if ($researchId === '') {
+            Response::json(['data' => null, 'error' => 'research_id is required'], 400);
+            return;
+        }
+
+        if (!in_array($action, ['view', 'download'], true)) {
+            Response::json(['data' => null, 'error' => 'Invalid research tracking action'], 400);
+            return;
+        }
+
+        $user = $this->getUser();
+        $userId = $user['sub'] ?? null;
+
+        try {
+            $paper = $this->db->getOne(
+                "SELECT * FROM research_papers WHERE id = ?",
+                [$researchId]
+            );
+
+            if (!$paper) {
+                Response::json(['data' => null, 'error' => 'Research paper not found'], 404);
+                return;
+            }
+
+            if ($action === 'view') {
+                $this->recordResearchActivity('research_views', $researchId, $userId);
+                $this->incrementResearchCounter($researchId, 'views_count');
+
+                Response::json(['data' => ['success' => true, 'action' => 'view'], 'error' => null]);
+                return;
+            }
+
+            if ($userId === null) {
+                Response::json(['data' => null, 'error' => 'Please log in to download this research paper'], 401);
+                return;
+            }
+
+            if (empty($paper['file_url'])) {
+                Response::json(['data' => null, 'error' => 'Research file not found'], 404);
+                return;
+            }
+
+            if ((string)($paper['allow_download'] ?? '1') === '0' && $paper['author_id'] !== $userId) {
+                Response::json(['data' => null, 'error' => 'Downloads are disabled for this research paper'], 403);
+                return;
+            }
+
+            $clientCost = max(0, (int)($payload['credit_cost'] ?? 0));
+            $creditCost = max((int)($paper['download_credit_cost'] ?? 0), $clientCost);
+            $shouldCharge = $creditCost > 0 && $paper['author_id'] !== $userId;
+            $creditsRemaining = null;
+            $downloadEarnings = null;
+
+            if ($shouldCharge) {
+                try {
+                    $this->db->beginTransaction();
+                    if (!$this->hasEnoughAICredits($userId, $creditCost)) {
+                        $this->db->rollback();
+                        Response::json(['data' => null, 'error' => "Not enough credits. This download requires {$creditCost} credit" . ($creditCost === 1 ? '' : 's') . '.'], 402);
+                        return;
+                    }
+                    $creditsRemaining = $this->decrementUserAICredit($creditCost);
+                    $downloadEarnings = $this->distributeDownloadCommission($paper, $userId, $creditCost);
+                    $this->db->commit();
+                } catch (\Throwable $e) {
+                    try {
+                        $this->db->rollback();
+                    } catch (\Throwable $rollbackError) {
+                        error_log('Download credit rollback failed: ' . $rollbackError->getMessage());
+                    }
+                    error_log('Download credit check/deduction failed: ' . $e->getMessage());
+                    Response::json(['data' => null, 'error' => 'Unable to process download credits. Please try again.'], 500);
+                    return;
+                }
+            }
+
+            $this->recordResearchActivity('research_downloads', $researchId, $userId);
+            $this->incrementResearchCounter($researchId, 'downloads_count');
+
+            Response::json(['data' => [
+                'success' => true,
+                'action' => 'download',
+                'download_url' => $paper['file_url'],
+                'credits_used' => $shouldCharge ? $creditCost : 0,
+                'credits_remaining' => $creditsRemaining,
+                'earnings' => $downloadEarnings,
+            ], 'error' => null]);
+        } catch (\Throwable $e) {
+            error_log('Track research view/download error: ' . $e->getMessage());
+            Response::json(['data' => null, 'error' => 'Failed to track research activity'], 500);
+        }
+    }
+
+    private function processReferral(array $payload): void {
+        $referralCode = strtoupper(trim((string)($payload['referralCode'] ?? $payload['referral_code'] ?? '')));
+        $newUserId = trim((string)($payload['newUserId'] ?? $payload['new_user_id'] ?? ''));
+
+        if ($referralCode === '' || $newUserId === '') {
+            Response::json(['data' => null, 'error' => 'referralCode and newUserId are required'], 400);
+            return;
+        }
+
+        try {
+            $code = $this->db->getOne('SELECT * FROM referral_codes WHERE UPPER(code) = ? LIMIT 1', [$referralCode]);
+            if (!$code) {
+                Response::json(['data' => null, 'error' => 'Referral code not found'], 404);
+                return;
+            }
+
+            $referrerId = (string)($code['user_id'] ?? '');
+            if ($referrerId === '' || $referrerId === $newUserId) {
+                Response::json(['data' => null, 'error' => 'Invalid referral code'], 400);
+                return;
+            }
+
+            $existing = $this->db->getOne('SELECT id, referral_code_id, referrer_id, credits_awarded, referred_credits_awarded FROM referral_usages WHERE referred_user_id = ? LIMIT 1', [$newUserId]);
+            if ($existing) {
+                $referrerBonusDue = max(0, self::REFERRAL_AI_CREDIT_BONUS - (int)($existing['credits_awarded'] ?? 0));
+                $referredBonusDue = max(0, self::REFERRAL_AI_CREDIT_BONUS - (int)($existing['referred_credits_awarded'] ?? 0));
+
+                if ($referrerBonusDue > 0 || $referredBonusDue > 0) {
+                    $now = date('Y-m-d H:i:s');
+                    $this->db->beginTransaction();
+                    if ($referrerBonusDue > 0 && !empty($existing['referrer_id'])) {
+                        $this->addSubscriptionAICredits((string)$existing['referrer_id'], $referrerBonusDue);
+                    }
+                    if ($referredBonusDue > 0) {
+                        $this->addSubscriptionAICredits($newUserId, $referredBonusDue);
+                    }
+                    $this->db->execute(
+                        'UPDATE referral_usages SET credits_awarded = COALESCE(credits_awarded, 0) + ?, referred_credits_awarded = COALESCE(referred_credits_awarded, 0) + ? WHERE id = ?',
+                        [$referrerBonusDue, $referredBonusDue, $existing['id']]
+                    );
+                    if ($referrerBonusDue > 0) {
+                        $this->db->execute(
+                            'UPDATE referral_codes SET credits_earned = COALESCE(credits_earned, 0) + ?, updated_at = ? WHERE id = ?',
+                            [$referrerBonusDue, $now, $existing['referral_code_id']]
+                        );
+                    }
+                    $this->db->commit();
+                }
+
+                Response::json(['data' => [
+                    'success' => true,
+                    'already_processed' => true,
+                    'referrer_bonus_awarded' => $referrerBonusDue,
+                    'referred_bonus_awarded' => $referredBonusDue,
+                ], 'error' => null]);
+                return;
+            }
+
+            $now = date('Y-m-d H:i:s');
+            $this->db->beginTransaction();
+            $this->addSubscriptionAICredits($referrerId, self::REFERRAL_AI_CREDIT_BONUS);
+            $this->addSubscriptionAICredits($newUserId, self::REFERRAL_AI_CREDIT_BONUS);
+            $this->db->execute(
+                'INSERT INTO referral_usages (id, referral_code_id, referrer_id, referred_user_id, credits_awarded, referred_credits_awarded, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [generateUUID(), $code['id'], $referrerId, $newUserId, self::REFERRAL_AI_CREDIT_BONUS, self::REFERRAL_AI_CREDIT_BONUS, $now]
+            );
+            $this->db->execute(
+                'UPDATE referral_codes SET total_referrals = COALESCE(total_referrals, 0) + 1, credits_earned = COALESCE(credits_earned, 0) + ?, updated_at = ? WHERE id = ?',
+                [self::REFERRAL_AI_CREDIT_BONUS, $now, $code['id']]
+            );
+            $this->db->commit();
+
+            Response::json(['data' => [
+                'success' => true,
+                'referrer_id' => $referrerId,
+                'referrer_bonus_awarded' => self::REFERRAL_AI_CREDIT_BONUS,
+                'referred_bonus_awarded' => self::REFERRAL_AI_CREDIT_BONUS,
+            ], 'error' => null]);
+        } catch (\Throwable $e) {
+            try {
+                $this->db->rollback();
+            } catch (\Throwable $rollbackError) {
+                error_log('Referral rollback failed: ' . $rollbackError->getMessage());
+            }
+            error_log('Process referral error: ' . $e->getMessage());
+            Response::json(['data' => null, 'error' => 'Failed to process referral'], 500);
+        }
+    }
+
+    private function ensureFreeAICredits(array $payload): void {
+        $newUserId = trim((string)($payload['userId'] ?? $payload['user_id'] ?? ''));
+        if ($newUserId === '') {
+            $user = $this->getUser();
+            $newUserId = (string)($user['sub'] ?? '');
+        }
+
+        if ($newUserId === '') {
+            Response::json(['data' => null, 'error' => 'userId is required'], 400);
+            return;
+        }
+
+        try {
+            $role = $this->roleForUser($newUserId) ?? 'researcher';
+            if ($role !== 'researcher') {
+                Response::json(['data' => ['success' => true, 'skipped' => true, 'role' => $role], 'error' => null]);
+                return;
+            }
+
+            $now = date('Y-m-d H:i:s');
+            $end = date('Y-m-d H:i:s', strtotime('+1 month'));
+            $subscription = $this->db->getOne('SELECT id, tier, ai_credits_remaining FROM subscriptions WHERE user_id = ? LIMIT 1', [$newUserId]);
+            $usage = $this->db->getOne('SELECT credits_used FROM ai_credits WHERE user_id = ? LIMIT 1', [$newUserId]);
+            $creditsUsed = (int)($usage['credits_used'] ?? 0);
+
+            if ($subscription) {
+                if (
+                    (string)($subscription['tier'] ?? 'free') === 'free' &&
+                    (int)($subscription['ai_credits_remaining'] ?? 0) < self::RESEARCHER_FREE_MONTHLY_CREDITS &&
+                    $creditsUsed === 0
+                ) {
+                    $this->db->execute(
+                        'UPDATE subscriptions SET current_period_start = COALESCE(current_period_start, ?), current_period_end = COALESCE(current_period_end, ?), ai_credits_remaining = ?, is_active = 1, updated_at = ? WHERE id = ?',
+                        [$now, $end, self::RESEARCHER_FREE_MONTHLY_CREDITS, $now, $subscription['id']]
+                    );
+                    Response::json(['data' => ['success' => true, 'credits_remaining' => self::RESEARCHER_FREE_MONTHLY_CREDITS], 'error' => null]);
+                    return;
+                }
+
+                Response::json(['data' => ['success' => true, 'credits_remaining' => (int)($subscription['ai_credits_remaining'] ?? 0)], 'error' => null]);
+                return;
+            }
+
+            $this->db->execute(
+                'INSERT INTO subscriptions (id, user_id, tier, amount, currency, current_period_start, current_period_end, ai_credits_remaining, ai_matchers_remaining, max_challenges_per_month, ai_matches_per_challenge, is_active, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [generateUUID(), $newUserId, 'free', 0, 'NGN', $now, $end, self::RESEARCHER_FREE_MONTHLY_CREDITS, 0, 0, 0, 1, $now, $now]
+            );
+
+            Response::json(['data' => ['success' => true, 'credits_remaining' => self::RESEARCHER_FREE_MONTHLY_CREDITS], 'error' => null]);
+        } catch (\Throwable $e) {
+            error_log('Ensure free AI credits error: ' . $e->getMessage());
+            Response::json(['data' => null, 'error' => 'Failed to initialize free AI credits'], 500);
+        }
+    }
+
+    private function recordResearchActivity(string $table, string $researchId, ?string $userId): void {
+        if (!in_array($table, ['research_views', 'research_downloads'], true)) {
+            return;
+        }
+
+        $attempts = [
+            [
+                'INSERT INTO ' . $table . ' (id, research_id, user_id, created_at) VALUES (?, ?, ?, ?)',
+                [generateUUID(), $researchId, $userId, date('Y-m-d H:i:s')],
+            ],
+            [
+                'INSERT INTO ' . $table . ' (id, research_id, user_id) VALUES (?, ?, ?)',
+                [generateUUID(), $researchId, $userId],
+            ],
+        ];
+
+        if ($userId !== null) {
+            $attempts[] = [
+                'INSERT INTO ' . $table . ' (id, research_id, user_id, created_at) VALUES (?, ?, NULL, ?)',
+                [generateUUID(), $researchId, date('Y-m-d H:i:s')],
+            ];
+            $attempts[] = [
+                'INSERT INTO ' . $table . ' (id, research_id, user_id) VALUES (?, ?, NULL)',
+                [generateUUID(), $researchId],
+            ];
+        }
+
+        foreach ($attempts as [$sql, $params]) {
+            try {
+                $this->db->execute($sql, $params);
+                return;
+            } catch (\Throwable $e) {
+                error_log("Research activity insert failed for {$table}: " . $e->getMessage());
+            }
+        }
+    }
+
+    private function incrementResearchCounter(string $researchId, string $column): void {
+        if (!in_array($column, ['views_count', 'downloads_count'], true)) {
+            return;
+        }
+
+        try {
+            $this->db->execute(
+                "UPDATE research_papers SET {$column} = COALESCE({$column}, 0) + 1 WHERE id = ?",
+                [$researchId]
+            );
+        } catch (\Throwable $e) {
+            error_log("Research counter update failed for {$column}: " . $e->getMessage());
+        }
+    }
+
+    public function runEmailDigests(string $secret, string $mode = 'all'): void {
+        $configuredSecret = trim((string)env('CRON_SECRET', ''));
+        if ($configuredSecret === '' || $configuredSecret === 'change_this_to_a_long_random_secret') {
+            Response::json(['error' => 'Cron email digest is not configured'], 500);
+            return;
+        }
+
+        if (!hash_equals($configuredSecret, $secret)) {
+            Response::json(['error' => 'Invalid cron secret'], 403);
+            return;
+        }
+
+        $allowedModes = ['all', 'related-research', 'research-tips', 'industry-hiring'];
+        if (!in_array($mode, $allowedModes, true)) {
+            Response::json(['error' => 'Invalid digest mode'], 400);
+            return;
+        }
+
+        $startedAt = date('Y-m-d H:i:s');
+        $summary = [
+            'mode' => $mode,
+            'started_at' => $startedAt,
+            'related_research_sent' => 0,
+            'research_tips_sent' => 0,
+            'industry_hiring_sent' => 0,
+            'errors' => [],
+        ];
+
+        try {
+            if ($mode === 'all' || $mode === 'related-research') {
+                $summary['related_research_sent'] = $this->sendRelatedResearchDigest();
+            }
+
+            if ($mode === 'all' || $mode === 'research-tips') {
+                $summary['research_tips_sent'] = $this->sendResearchTipsDigest();
+            }
+
+            if ($mode === 'all' || $mode === 'industry-hiring') {
+                $summary['industry_hiring_sent'] = $this->sendIndustryHiringDigest();
+            }
+        } catch (\Throwable $e) {
+            error_log('Cron email digest failed: ' . $e->getMessage());
+            $summary['errors'][] = $e->getMessage();
+        }
+
+        $summary['finished_at'] = date('Y-m-d H:i:s');
+        Response::json(['data' => $summary, 'error' => null]);
+    }
+
+    private function departmentLookup(array $payload): void {
+        $this->requireRole('admin');
+
+        $schoolName = trim((string)($payload['school_name'] ?? $payload['institution_name'] ?? ''));
+        $website = trim((string)($payload['website'] ?? ''));
+        if ($schoolName === '') {
+            Response::json(['data' => ['departments' => [], 'source' => 'none'], 'error' => 'school_name is required'], 400);
+            return;
+        }
+
+        $fallback = $this->defaultDepartmentsForSchool($schoolName);
+        $departments = [];
+        $source = 'default';
+        $searchQuery = "{$schoolName} list of departments";
+        $webContext = $this->departmentSearchContext($searchQuery, $website);
+
+        try {
+            $prompt = "Search query: {$searchQuery}\n" .
+                ($website !== '' ? "\nWebsite: {$website}" : '') .
+                ($webContext !== '' ? "\n\nOnline search/page context:\n{$webContext}" : '') .
+                "\n\nExtract departments, faculties, schools, or academic units for the institution named exactly: {$schoolName}. " .
+                "Prefer names found in the online context. If the context is incomplete, add likely formal department names for that institution type. " .
+                "Return only JSON in this exact format: {\"departments\":[\"Department name\"]}. " .
+                "Avoid duplicates and include 15 to 60 relevant departments when available.";
+            $result = $this->chatText(
+                'You help Nigerian education administrators prepare institution department lists. Return JSON only.',
+                $prompt,
+                ['temperature' => 0.2, 'max_tokens' => 1800]
+            );
+
+            $json = $this->jsonFromText($result['content']) ?: [];
+            $candidate = $json['departments'] ?? [];
+            if (is_array($candidate)) {
+                $departments = $this->normalizeDepartmentNames($candidate);
+                if ($departments) {
+                    $source = $webContext !== '' ? 'online-ai' : 'ai';
+                }
+            }
+        } catch (\Throwable $e) {
+            error_log('Department lookup AI failed: ' . $e->getMessage());
+        }
+
+        if (!$departments) {
+            $departments = $fallback;
+        } else {
+            $departments = $this->normalizeDepartmentNames(array_merge($departments, $fallback));
+        }
+
+        Response::json(['data' => [
+            'departments' => $departments,
+            'source' => $source,
+            'search_query' => $searchQuery,
+        ], 'error' => null]);
+    }
+
     private function aiResearch(array $payload): void {
         $this->requireAuth();
+        $user = $this->getUser();
 
         try {
             $type = (string)($payload['type'] ?? '');
@@ -114,18 +541,41 @@ class FunctionController extends Controller {
                 Response::json(['data' => ['error' => 'AI type and content are required'], 'error' => null], 400);
                 return;
             }
+            $requestedCount = max(1, min(10, (int)($payload['requested_count'] ?? 10)));
 
-            $prompt = $this->researchPrompt($type, $content);
+            if (!$this->hasEnoughAICredits($user['sub'])) {
+                Response::json(['data' => [
+                    'error' => 'AI_CREDITS_EXHAUSTED',
+                    'message' => 'You have used all your AI credits for this period. Top up your credits or upgrade your plan to continue.',
+                    'credits_required' => 1,
+                    'credits_remaining' => 0,
+                ], 'error' => null]);
+                return;
+            }
+
+            $prompt = $this->researchPrompt($type, $content, $requestedCount);
             $result = $this->chatText(
                 'You are an academic research assistant for R2P Connect. Give practical, structured, Nigeria-aware research guidance.',
                 $prompt,
-                ['temperature' => 0.35, 'max_tokens' => 1800]
+                ['temperature' => 0.35, 'max_tokens' => $this->researchMaxTokens($type, $requestedCount)]
             );
+            $content = $result['content'];
+
+            if ($this->isTopicResearchType($type)) {
+                $content = $this->ensureTopicResultCount($type, $content, $requestedCount);
+
+                if ($this->topicCountFromAiText($content) < $requestedCount) {
+                    Response::json(['data' => [
+                        'error' => "The AI returned fewer than {$requestedCount} topics. No AI credit was deducted. Please try again.",
+                        'credits_required' => 1,
+                    ], 'error' => null], 502);
+                    return;
+                }
+            }
 
             Response::json(['data' => [
-                'result' => $result['content'],
+                'result' => $content,
                 'credits_remaining' => $this->decrementUserAICredit(),
-                'provider' => $result['provider'],
             ], 'error' => null]);
         } catch (\Throwable $e) {
             $this->aiErrorResponse('AI research request failed', $e);
@@ -142,13 +592,28 @@ class FunctionController extends Controller {
             $chapterNumber = isset($payload['chapter_number']) ? (int)$payload['chapter_number'] : null;
             $chapterContent = trim((string)($payload['chapter_content'] ?? ''));
             $reviewMode = (string)($payload['review_mode'] ?? 'quick');
+            $creditCost = $this->aiCreditCostForMode($reviewMode);
 
             if ($researchId === '' || $chapterContent === '') {
                 Response::json(['data' => null, 'error' => ['error' => 'research_id and chapter_content are required']], 400);
                 return;
             }
 
-            $prompt = "Review this research chapter in {$reviewMode} mode. Return only valid JSON with these keys: chapter_name, rating, academic_clarity_score, summary, strengths, weak_areas, recommendations, required_fixes, optional_improvements, examiner_readiness, ai_confidence_score.\n\nChapter: {$chapterName}\n\nContent:\n{$chapterContent}";
+            if (!$this->hasEnoughAICredits($user['sub'], $creditCost)) {
+                Response::json(['data' => [
+                    'error' => 'Not enough AI credits',
+                    'credits_required' => $creditCost,
+                ], 'error' => null], 402);
+                return;
+            }
+
+            $prompt = "Review this research chapter in {$reviewMode} mode. Return only valid JSON with these exact keys: " .
+                "chapter_name, rating, academic_clarity_score, methodology_alignment, style_match_score, summary, strengths, weak_areas, recommendations, " .
+                "required_fixes, optional_improvements, examiner_readiness, why_it_matters, examiner_expectations, generic_examples, ai_confidence_score, ai_confidence_explanation. " .
+                "rating, academic_clarity_score, and methodology_alignment must be numbers from 1 to 5. style_match_score and ai_confidence_score must be numbers from 0 to 100. " .
+                "strengths, weak_areas, recommendations, required_fixes, optional_improvements, why_it_matters, examiner_expectations, and generic_examples must be arrays of strings. " .
+                "why_it_matters should explain the academic importance of the issues found. examiner_expectations should list what an examiner or supervisor expects to see. " .
+                "generic_examples should give safe generic rewrite examples without copying from other student work.\n\nChapter: {$chapterName}\n\nContent:\n{$chapterContent}";
             $response = $this->chatText(
                 'You are a strict but helpful academic supervisor. Return JSON only. Ratings are 1-5. examiner_readiness must be one of not_ready, needs_revision, supervisor_ready.',
                 $prompt,
@@ -161,6 +626,8 @@ class FunctionController extends Controller {
                 'chapter_number' => $chapterNumber,
                 'rating' => 3,
                 'academic_clarity_score' => 3,
+                'methodology_alignment' => 3,
+                'style_match_score' => 75,
                 'summary' => $response['content'],
                 'strengths' => [],
                 'weak_areas' => [],
@@ -168,13 +635,44 @@ class FunctionController extends Controller {
                 'required_fixes' => [],
                 'optional_improvements' => [],
                 'examiner_readiness' => 'needs_revision',
+                'why_it_matters' => [],
+                'examiner_expectations' => [],
+                'generic_examples' => [],
                 'ai_confidence_score' => 75,
+                'ai_confidence_explanation' => null,
                 'review_mode' => $reviewMode,
                 'created_at' => date('Y-m-d H:i:s'),
             ], $review);
+            $review['why_it_matters'] = $this->firstStringList([
+                $review['why_it_matters'] ?? null,
+                $review['why_it_matters_academically'] ?? null,
+                $review['academic_importance'] ?? null,
+                $review['why_it_matters_academic'] ?? null,
+            ]);
+            $review['examiner_expectations'] = $this->firstStringList([
+                $review['examiner_expectations'] ?? null,
+                $review['what_examiners_expect'] ?? null,
+                $review['examiner_expectations_list'] ?? null,
+                $review['what_examiner_expects'] ?? null,
+            ]);
+            $review['generic_examples'] = $this->firstStringList([
+                $review['generic_examples'] ?? null,
+                $review['examples'] ?? null,
+                $review['generic_rewrite_examples'] ?? null,
+            ]);
+            if (!$review['why_it_matters']) {
+                $review['why_it_matters'] = $this->defaultWhyItMatters($review);
+            }
+            if (!$review['examiner_expectations']) {
+                $review['examiner_expectations'] = $this->defaultExaminerExpectations((string)($review['chapter_name'] ?? $chapterName));
+            }
 
             $this->storeChapterReview($researchId, $user['sub'], $review);
-            Response::json(['data' => ['review' => $review, 'provider' => $response['provider']], 'error' => null]);
+            Response::json(['data' => [
+                'review' => $review,
+                'credits_remaining' => $this->decrementUserAICredit($creditCost),
+                'credits_used' => $creditCost,
+            ], 'error' => null]);
         } catch (\Throwable $e) {
             $this->aiErrorResponse('AI chapter review failed', $e);
         }
@@ -184,17 +682,36 @@ class FunctionController extends Controller {
         try {
             $excerpt = trim((string)($payload['excerpt'] ?? $payload['content'] ?? ''));
             if ($excerpt === '') {
-                Response::json(['data' => ['error' => 'Excerpt is required'], 'error' => null], 400);
-                return;
+                $excerpt = "The study examines how renewable energy adoption can improve electricity access for small businesses in rural communities. Data will be collected through questionnaires and interviews with business owners, while the analysis will compare perceived cost, reliability, and productivity before and after solar power adoption. The research expects to show that stable power supply improves business performance, although affordability and maintenance remain major barriers.";
             }
+
+            $preset = is_array($payload['preset'] ?? null) ? $payload['preset'] : [];
+            $focusAreas = implode(', ', array_filter((array)($preset['focus_areas'] ?? [])));
+            $doRules = implode('; ', array_filter((array)($preset['do_rules'] ?? [])));
+            $dontRules = implode('; ', array_filter((array)($preset['dont_rules'] ?? [])));
+            $presetInstructions = [
+                'Preset name: ' . (string)($preset['name'] ?? 'Untitled preset'),
+                'Tone: ' . (string)($preset['tone'] ?? 'supportive'),
+                'Strictness: ' . (string)($preset['strictness'] ?? 'balanced'),
+                'Citation style: ' . (string)($preset['citation_style'] ?? 'apa'),
+                'Research field: ' . (string)($preset['research_field'] ?? 'general research'),
+                'Preferred methodology: ' . (string)($preset['preferred_methodology'] ?? 'not specified'),
+                'Focus areas: ' . ($focusAreas !== '' ? $focusAreas : 'academic clarity, structure, methodology, citation quality'),
+                'Do: ' . ($doRules !== '' ? $doRules : 'give practical, specific feedback'),
+                "Don't: " . ($dontRules !== '' ? $dontRules : 'rewrite the entire work for the student'),
+                'Custom guidance: ' . (string)($preset['custom_guidance'] ?? ''),
+                'Example feedback style: ' . (string)($preset['example_feedback'] ?? ''),
+            ];
 
             $result = $this->chatText(
                 'You are an AI research supervisor giving concise feedback previews.',
-                "Return a short preview under 180 words showing how you would review this excerpt:\n\n{$excerpt}",
+                "Use this supervisor preset:\n" . implode("\n", $presetInstructions) .
+                "\n\nReturn a short preview under 180 words showing how you would review this student excerpt. " .
+                "Keep the voice aligned with the preset and include actionable feedback.\n\nExcerpt:\n{$excerpt}",
                 ['temperature' => 0.35, 'max_tokens' => 500]
             );
 
-            Response::json(['data' => ['preview' => $result['content'], 'provider' => $result['provider']], 'error' => null]);
+            Response::json(['data' => ['preview' => $result['content']], 'error' => null]);
         } catch (\Throwable $e) {
             $this->aiErrorResponse('AI training preview failed', $e);
         }
@@ -202,6 +719,7 @@ class FunctionController extends Controller {
 
     private function researchIntegrityCheck(array $payload): void {
         $this->requireAuth();
+        $user = $this->getUser();
 
         try {
             $researchId = (string)($payload['research_id'] ?? '');
@@ -209,6 +727,16 @@ class FunctionController extends Controller {
             $abstract = (string)($payload['abstract'] ?? '');
             if ($researchId === '' || trim($title . $abstract) === '') {
                 Response::json(['data' => ['error' => 'Research title or abstract is required'], 'error' => null], 400);
+                return;
+            }
+
+            if (!$this->hasEnoughAICredits($user['sub'])) {
+                Response::json(['data' => [
+                    'error' => 'AI_CREDITS_EXHAUSTED',
+                    'message' => 'You have used all your AI credits for this period. Top up your credits or upgrade your plan to continue.',
+                    'credits_required' => 1,
+                    'credits_remaining' => 0,
+                ], 'error' => null]);
                 return;
             }
 
@@ -235,7 +763,7 @@ class FunctionController extends Controller {
                 'summary' => $analysis['summary'] ?? $result['content'],
                 'recommendations' => $analysis['recommendations'] ?? [],
                 'document_analyzed' => false,
-                'provider' => $result['provider'],
+                'credits_remaining' => $this->decrementUserAICredit(),
             ], 'error' => null]);
         } catch (\Throwable $e) {
             $this->aiErrorResponse('Research integrity check failed', $e);
@@ -244,7 +772,7 @@ class FunctionController extends Controller {
 
     private function aiCollabMatcher(): void {
         $this->requireAuth();
-        Response::json(['data' => ['matches' => [], 'total_matches' => 0, 'provider' => null], 'error' => null]);
+        Response::json(['data' => ['matches' => [], 'total_matches' => 0], 'error' => null]);
     }
 
     private function aiMatchChallenge(array $payload): void {
@@ -280,6 +808,304 @@ class FunctionController extends Controller {
         $recipientName = (string)($data['name'] ?? $data['supervisorName'] ?? $data['reviewerName'] ?? $data['studentName'] ?? $data['adminName'] ?? '');
         $result = $this->sendZeptoMail($to, $recipientName, $template['subject'], $template['html']);
         Response::json(['data' => ['success' => true, 'message' => 'Email sent successfully', 'result' => $result], 'error' => null]);
+    }
+
+    private function notifySupervisorRegistration(array $payload): void {
+        $supervisorUserId = trim((string)($payload['supervisor_user_id'] ?? $payload['user_id'] ?? $payload['userId'] ?? ''));
+        $supervisorEmailInput = strtolower(trim((string)($payload['supervisor_email'] ?? $payload['email'] ?? '')));
+
+        if ($supervisorUserId === '' && !$this->isEmail($supervisorEmailInput)) {
+            Response::json(['data' => null, 'error' => 'Supervisor user id or email is required'], 400);
+            return;
+        }
+
+        if ($supervisorUserId !== '') {
+            $supervisor = $this->db->getOne(
+                'SELECT p.user_id, p.full_name, p.email, p.institution_id AS profile_institution_id, p.department AS profile_department,
+                        s.institution_id AS supervisor_institution_id, s.department AS supervisor_department, s.academic_rank, s.staff_id,
+                        i.id AS institution_id, i.name AS institution_name, i.admin_user_id
+                 FROM profiles p
+                 LEFT JOIN supervisors s ON s.user_id = p.user_id
+                 LEFT JOIN institutions i ON i.id = COALESCE(s.institution_id, p.institution_id)
+                 WHERE p.user_id = ?
+                 LIMIT 1',
+                [$supervisorUserId]
+            );
+        } else {
+            $supervisor = $this->db->getOne(
+                'SELECT p.user_id, p.full_name, p.email, p.institution_id AS profile_institution_id, p.department AS profile_department,
+                        s.institution_id AS supervisor_institution_id, s.department AS supervisor_department, s.academic_rank, s.staff_id,
+                        i.id AS institution_id, i.name AS institution_name, i.admin_user_id
+                 FROM profiles p
+                 LEFT JOIN supervisors s ON s.user_id = p.user_id
+                 LEFT JOIN institutions i ON i.id = COALESCE(s.institution_id, p.institution_id)
+                 WHERE LOWER(p.email) = ?
+                 LIMIT 1',
+                [$supervisorEmailInput]
+            );
+        }
+
+        if (!$supervisor) {
+            Response::json(['data' => null, 'error' => 'Supervisor profile was not found'], 404);
+            return;
+        }
+
+        $recipients = [];
+        $addRecipient = function (string $email, string $name, string $scope) use (&$recipients): void {
+            $email = strtolower(trim($email));
+            if (!$this->isEmail($email)) {
+                return;
+            }
+            $recipients[$email] = [
+                'email' => $email,
+                'name' => trim($name) !== '' ? trim($name) : 'Admin',
+                'scope' => $scope,
+            ];
+        };
+
+        $adminUserId = (string)($supervisor['admin_user_id'] ?? '');
+        if ($adminUserId !== '') {
+            $institutionAdmin = $this->db->getOne('SELECT full_name, email FROM profiles WHERE user_id = ? LIMIT 1', [$adminUserId]);
+            if ($institutionAdmin) {
+                $addRecipient((string)($institutionAdmin['email'] ?? ''), (string)($institutionAdmin['full_name'] ?? ''), 'institution');
+            }
+        }
+
+        $platformAdminRows = $this->db->getAll(
+            "SELECT p.full_name, p.email
+             FROM user_roles ur
+             INNER JOIN profiles p ON p.user_id = ur.user_id
+             WHERE ur.role = 'admin' AND p.email IS NOT NULL AND p.email <> ''
+             LIMIT 10"
+        );
+        foreach ($platformAdminRows as $row) {
+            $addRecipient((string)($row['email'] ?? ''), (string)($row['full_name'] ?? ''), 'platform');
+        }
+
+        $supportEmail = '';
+        try {
+            $setting = $this->db->getOne('SELECT value FROM platform_settings WHERE `key` = ? LIMIT 1', ['support_email']);
+            $supportEmail = trim((string)($setting['value'] ?? ''));
+        } catch (\Throwable $e) {
+            error_log('Support email lookup failed: ' . $e->getMessage());
+        }
+        $addRecipient((string)env('ADMIN_EMAIL', ''), 'Platform Admin', 'platform');
+        $addRecipient($supportEmail, 'Platform Admin', 'platform');
+
+        if (empty($recipients)) {
+            Response::json(['data' => ['success' => false, 'message' => 'No admin email recipient found'], 'error' => null]);
+            return;
+        }
+
+        $sent = [];
+        $failed = [];
+        foreach ($recipients as $recipient) {
+            $ctaUrl = $recipient['scope'] === 'institution' ? '/institution/supervisors' : '/admin/users';
+            $template = $this->emailTemplate('supervisor_registered', [
+                'adminName' => $recipient['name'],
+                'supervisorName' => (string)($supervisor['full_name'] ?? 'A supervisor'),
+                'supervisorEmail' => (string)($supervisor['email'] ?? ''),
+                'department' => (string)($supervisor['supervisor_department'] ?? $supervisor['profile_department'] ?? ''),
+                'institutionName' => (string)($supervisor['institution_name'] ?? ''),
+                'academicRank' => (string)($supervisor['academic_rank'] ?? ''),
+                'staffId' => (string)($supervisor['staff_id'] ?? ''),
+                'ctaUrl' => $ctaUrl,
+                'ctaText' => 'Verify Supervisor',
+            ]);
+
+            try {
+                $this->sendZeptoMail($recipient['email'], $recipient['name'], $template['subject'], $template['html']);
+                $sent[] = $recipient['email'];
+            } catch (\Throwable $e) {
+                error_log('Supervisor registration notification failed for ' . $recipient['email'] . ': ' . $e->getMessage());
+                $failed[] = ['email' => $recipient['email'], 'error' => $e->getMessage()];
+            }
+        }
+
+        Response::json(['data' => [
+            'success' => count($sent) > 0,
+            'sent' => $sent,
+            'failed' => $failed,
+        ], 'error' => null]);
+    }
+
+    private function aiSavedResponses(array $payload): void {
+        try {
+            $user = $this->currentUserOrFail();
+            $action = strtolower(trim((string)($payload['action'] ?? 'list')));
+
+            if ($action === 'save') {
+                $this->saveAIResponse($user, $payload);
+                return;
+            }
+
+            if ($action === 'delete') {
+                $this->deleteAIResponse($user, $payload);
+                return;
+            }
+
+            $this->listAIResponses($user, $payload);
+        } catch (\Throwable $e) {
+            error_log('AI saved responses error: ' . $e->getMessage());
+            Response::json(['data' => null, 'error' => $e->getMessage() ?: 'Unable to process saved AI responses'], 500);
+        }
+    }
+
+    private function listAIResponses(array $user, array $payload): void {
+        $toolType = trim((string)($payload['tool_type'] ?? $payload['toolType'] ?? ''));
+        $limit = max(1, min(50, (int)($payload['limit'] ?? 20)));
+        $params = [$user['sub']];
+        $where = 'WHERE user_id = ?';
+
+        if ($toolType !== '') {
+            $where .= ' AND tool_type = ?';
+            $params[] = $toolType;
+        }
+
+        $params[] = $limit;
+        $rows = $this->db->getAll(
+            "SELECT id, tool_type, title, prompt, response, metadata, tier_at_save, created_at, updated_at
+             FROM ai_saved_responses
+             {$where}
+             ORDER BY created_at DESC
+             LIMIT ?",
+            $params
+        );
+
+        foreach ($rows as &$row) {
+            $row['metadata'] = $this->decodeJsonField($row['metadata'] ?? null, []);
+        }
+
+        Response::json(['data' => [
+            'responses' => $rows,
+            'subscription' => $this->aiSaveSubscriptionStatus((string)$user['sub']),
+        ], 'error' => null]);
+    }
+
+    private function saveAIResponse(array $user, array $payload): void {
+        $toolType = trim((string)($payload['tool_type'] ?? $payload['toolType'] ?? ''));
+        $title = trim((string)($payload['title'] ?? 'AI response'));
+        $prompt = trim((string)($payload['prompt'] ?? ''));
+        $response = trim((string)($payload['response'] ?? ''));
+        $metadata = $payload['metadata'] ?? [];
+
+        if ($toolType === '' || $response === '') {
+            Response::json(['data' => null, 'error' => 'Tool type and response are required'], 400);
+            return;
+        }
+
+        if (!is_array($metadata)) {
+            $metadata = [];
+        }
+
+        $status = $this->aiSaveSubscriptionStatus((string)$user['sub']);
+        if (!$status['can_save']) {
+            Response::json(['data' => null, 'error' => $status['message']], 402);
+            return;
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $id = generateUUID();
+        $this->db->execute(
+            'INSERT INTO ai_saved_responses (id, user_id, tool_type, title, prompt, response, metadata, tier_at_save, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [
+                $id,
+                $user['sub'],
+                $toolType,
+                $this->shortText($title !== '' ? $title : 'AI response', 180),
+                $prompt,
+                $response,
+                json_encode($metadata),
+                $status['tier'],
+                $now,
+                $now,
+            ]
+        );
+
+        Response::json(['data' => [
+            'success' => true,
+            'response' => [
+                'id' => $id,
+                'tool_type' => $toolType,
+                'title' => $this->shortText($title !== '' ? $title : 'AI response', 180),
+                'prompt' => $prompt,
+                'response' => $response,
+                'metadata' => $metadata,
+                'tier_at_save' => $status['tier'],
+                'created_at' => $now,
+                'updated_at' => $now,
+            ],
+            'subscription' => $status,
+        ], 'error' => null]);
+    }
+
+    private function deleteAIResponse(array $user, array $payload): void {
+        $id = trim((string)($payload['id'] ?? ''));
+        if ($id === '') {
+            Response::json(['data' => null, 'error' => 'Saved response id is required'], 400);
+            return;
+        }
+
+        $this->db->execute('DELETE FROM ai_saved_responses WHERE id = ? AND user_id = ?', [$id, $user['sub']]);
+        Response::json(['data' => ['success' => true], 'error' => null]);
+    }
+
+    private function aiSaveSubscriptionStatus(string $userId): array {
+        $subscription = $this->db->getOne(
+            'SELECT tier, is_active, current_period_end FROM subscriptions WHERE user_id = ? LIMIT 1',
+            [$userId]
+        );
+
+        $tier = (string)($subscription['tier'] ?? 'free');
+        $isFree = $tier === '' || $tier === 'free';
+        $savedCountRow = $this->db->getOne('SELECT COUNT(*) AS total FROM ai_saved_responses WHERE user_id = ?', [$userId]);
+        $savedCount = (int)($savedCountRow['total'] ?? 0);
+
+        if ($isFree) {
+            $remaining = max(0, 3 - $savedCount);
+            return [
+                'tier' => 'free',
+                'is_paid_active' => false,
+                'saved_count' => $savedCount,
+                'free_limit' => 3,
+                'remaining_free_saves' => $remaining,
+                'can_save' => $remaining > 0,
+                'message' => $remaining > 0
+                    ? "Free plan users can save {$remaining} more AI response" . ($remaining === 1 ? '' : 's') . '.'
+                    : 'Free plan users can save only 3 AI responses. Please subscribe to continue saving AI responses.',
+            ];
+        }
+
+        $periodEnd = (string)($subscription['current_period_end'] ?? '');
+        $isActive = (int)($subscription['is_active'] ?? 0) === 1;
+        $hasActivePeriod = $periodEnd !== '' && strtotime($periodEnd) >= time();
+        $canSave = $isActive && $hasActivePeriod;
+
+        return [
+            'tier' => $tier,
+            'is_paid_active' => $canSave,
+            'saved_count' => $savedCount,
+            'free_limit' => 3,
+            'remaining_free_saves' => null,
+            'can_save' => $canSave,
+            'message' => $canSave
+                ? 'Your active subscription allows unlimited saved AI responses.'
+                : 'Your subscription is not active. Please subscribe to continue saving AI responses.',
+        ];
+    }
+
+    private function decodeJsonField($value, $fallback) {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (!is_string($value) || trim($value) === '') {
+            return $fallback;
+        }
+
+        $decoded = json_decode($value, true);
+        return is_array($decoded) ? $decoded : $fallback;
     }
 
     private function sendVerificationCode(array $payload): void {
@@ -625,7 +1451,7 @@ class FunctionController extends Controller {
             return;
         }
 
-        $coupon = $this->couponFromPayload($payload);
+        $coupon = $this->couponFromPayload($payload, $user['sub'], $planId, $userType);
         $amount = $this->discountedAmount((float)$plan['amount_ngn'], $coupon);
         $reference = $this->makeReference('sub');
         $callback = $this->callbackUrlFor($userType, $payload, $reference);
@@ -686,6 +1512,7 @@ class FunctionController extends Controller {
             }
 
             $subscription = $this->upsertSubscription($payment['user_id'], $plan, (float)$payment['amount'], $reference);
+            $this->distributeSubscriptionCommissions($payment['user_id'], $subscription['id'], (float)$payment['amount'], $reference);
             $this->completePayment($reference);
             $couponId = $this->couponIdFromCode($payment['coupon_code'] ?? null);
             $this->recordCouponUsage($couponId, $payment['user_id'], $subscription['id'], (float)$plan['amount_ngn'], (float)$payment['amount']);
@@ -704,7 +1531,7 @@ class FunctionController extends Controller {
         $tier = $this->normalizeTier((string)($payload['planId'] ?? ''));
         $userType = (string)($payload['userType'] ?? $this->roleForUser($user['sub']) ?? 'researcher');
         $planId = "{$userType}_{$tier}";
-        $coupon = $this->couponFromPayload($payload);
+        $coupon = $this->couponFromPayload($payload, $user['sub'], $planId, $userType);
 
         if (!$coupon || (int)$coupon['discount_percentage'] < 100) {
             Response::json(['data' => null, 'error' => 'A valid 100% coupon is required'], 400);
@@ -881,8 +1708,16 @@ class FunctionController extends Controller {
         $callback = (string)($payload['callback_url'] ?? '');
         $this->insertPayment($user['sub'], $amount, $reference, 'Job Application', 'job_application');
 
-        $platformShare = round($amount * 0.2, 2);
-        $ownerShare = $amount - $platformShare;
+        $ownerPercent = $this->platformSettingNumber('ipn_share_percent', 80);
+        $platformPercent = $this->platformSettingNumber('ipn_platform_share_percent', 20);
+        $totalPercent = $ownerPercent + $platformPercent;
+        if ($totalPercent <= 0) {
+            $ownerPercent = 80;
+            $platformPercent = 20;
+            $totalPercent = 100;
+        }
+        $ownerShare = round($amount * ($ownerPercent / $totalPercent), 2);
+        $platformShare = max(0, round($amount - $ownerShare, 2));
         $directJob = $this->db->getOne('SELECT id FROM job_postings WHERE id = ? LIMIT 1', [$jobId]);
         if ($directJob) {
             $this->db->execute(
@@ -922,9 +1757,21 @@ class FunctionController extends Controller {
         }
 
         if (($payment['status'] ?? '') !== 'success') {
-            $this->db->execute('UPDATE industry_job_payments SET status = ? WHERE paystack_reference = ?', ['success', $reference]);
-            $this->db->execute('UPDATE ipn_payments SET status = ? WHERE paystack_reference = ?', ['success', $reference]);
-            $this->completePayment($reference);
+            $this->db->beginTransaction();
+            try {
+                $this->creditPaidApplicationOwners($reference);
+                $this->db->execute('UPDATE industry_job_payments SET status = ? WHERE paystack_reference = ?', ['success', $reference]);
+                $this->db->execute('UPDATE ipn_payments SET status = ? WHERE paystack_reference = ?', ['success', $reference]);
+                $this->completePayment($reference);
+                $this->db->commit();
+            } catch (\Throwable $e) {
+                try {
+                    $this->db->rollback();
+                } catch (\Throwable $rollbackError) {
+                    error_log('Job payment rollback failed: ' . $rollbackError->getMessage());
+                }
+                throw $e;
+            }
         }
 
         Response::json(['data' => ['success' => true, 'status' => 'success', 'amount' => (float)$payment['amount']], 'error' => null]);
@@ -1131,15 +1978,25 @@ class FunctionController extends Controller {
         return $base . $path . '?verify=true&reference=' . rawurlencode($reference);
     }
 
-    private function couponFromPayload(array $payload): ?array {
-        $couponId = (string)($payload['couponId'] ?? '');
-        if ($couponId === '') {
+    private function couponFromPayload(array $payload, ?string $userId = null, ?string $planId = null, ?string $userType = null): ?array {
+        $couponId = trim((string)($payload['couponId'] ?? $payload['coupon_id'] ?? ''));
+        $couponCode = strtoupper(trim((string)($payload['couponCode'] ?? $payload['coupon_code'] ?? $payload['code'] ?? '')));
+        if ($couponId === '' && $couponCode === '') {
             return null;
         }
 
-        $coupon = $this->db->getOne('SELECT * FROM coupon_codes WHERE id = ? AND is_active = 1', [$couponId]);
+        if ($couponId !== '') {
+            $coupon = $this->db->getOne('SELECT * FROM coupon_codes WHERE id = ? AND is_active = 1', [$couponId]);
+        } else {
+            $coupon = $this->db->getOne('SELECT * FROM coupon_codes WHERE UPPER(code) = ? AND is_active = 1', [$couponCode]);
+        }
+
         if (!$coupon) {
             throw new \RuntimeException('Invalid coupon');
+        }
+
+        if (!empty($coupon['valid_from']) && strtotime((string)$coupon['valid_from']) > time()) {
+            throw new \RuntimeException('This coupon is not active yet');
         }
 
         if (!empty($coupon['valid_until']) && strtotime((string)$coupon['valid_until']) < time()) {
@@ -1148,6 +2005,43 @@ class FunctionController extends Controller {
 
         if (!empty($coupon['max_uses']) && (int)$coupon['current_uses'] >= (int)$coupon['max_uses']) {
             throw new \RuntimeException('This coupon has reached its usage limit');
+        }
+
+        if ($planId && !empty($coupon['plan_id']) && (string)$coupon['plan_id'] !== $planId) {
+            throw new \RuntimeException("This coupon doesn't apply to the selected plan");
+        }
+
+        if ($userType && !empty($coupon['user_type']) && (string)$coupon['user_type'] !== $userType) {
+            throw new \RuntimeException("This coupon doesn't apply to this account type");
+        }
+
+        if ($userId && !empty($coupon['institution_id'])) {
+            $profile = $this->db->getOne('SELECT institution_id FROM profiles WHERE user_id = ? LIMIT 1', [$userId]);
+            if (($profile['institution_id'] ?? null) !== $coupon['institution_id']) {
+                throw new \RuntimeException('This coupon is not valid for your institution');
+            }
+        }
+
+        if ($userId) {
+            $perUserLimit = (int)($coupon['max_uses_per_user'] ?? 1);
+            if ((int)$coupon['discount_percentage'] >= 100) {
+                $monthStart = date('Y-m-01 00:00:00');
+                $usage = $this->db->getOne(
+                    'SELECT COUNT(*) AS count FROM coupon_usages WHERE coupon_id = ? AND user_id = ? AND used_at >= ?',
+                    [$coupon['id'], $userId, $monthStart]
+                );
+                if ((int)($usage['count'] ?? 0) > 0) {
+                    throw new \RuntimeException('You have already used this coupon this month');
+                }
+            } elseif ($perUserLimit > 0) {
+                $usage = $this->db->getOne(
+                    'SELECT COUNT(*) AS count FROM coupon_usages WHERE coupon_id = ? AND user_id = ?',
+                    [$coupon['id'], $userId]
+                );
+                if ((int)($usage['count'] ?? 0) >= $perUserLimit) {
+                    throw new \RuntimeException($perUserLimit === 1 ? 'You have already used this coupon' : "You have reached the usage limit ({$perUserLimit}) for this coupon");
+                }
+            }
         }
 
         return $coupon;
@@ -1166,6 +2060,9 @@ class FunctionController extends Controller {
         $now = date('Y-m-d H:i:s');
         $end = date('Y-m-d H:i:s', strtotime('+1 month'));
         $credits = (int)($plan['ai_credits_per_day'] ?? 0);
+        if ((string)$plan['plan_id'] === 'researcher_free') {
+            $credits = self::RESEARCHER_FREE_MONTHLY_CREDITS;
+        }
         $matches = (int)($plan['ai_matches_per_challenge'] ?? 0);
         $maxChallenges = (int)($plan['max_challenges'] ?? 0);
 
@@ -1222,12 +2119,766 @@ class FunctionController extends Controller {
         );
     }
 
+    private function creditPaidApplicationOwners(string $reference): void {
+        $directPayment = $this->db->getOne(
+            'SELECT ijp.*, jp.industry_id, jp.title
+             FROM industry_job_payments ijp
+             INNER JOIN job_postings jp ON jp.id = ijp.job_id
+             WHERE ijp.paystack_reference = ? AND ijp.status <> ?
+             LIMIT 1',
+            [$reference, 'success']
+        );
+
+        if ($directPayment && (float)$directPayment['industry_share_ngn'] > 0) {
+            $this->upsertIndustryEarningWallet((string)$directPayment['industry_id'], (float)$directPayment['industry_share_ngn']);
+            $this->recordWalletCredit(
+                (string)$directPayment['industry_id'],
+                'earning',
+                (float)$directPayment['industry_share_ngn'],
+                'Job application fee share: ' . $this->shortText((string)($directPayment['title'] ?? 'Job application'), 80),
+                "{$reference}_industry",
+                'job_application_fee',
+                ['job_id' => $directPayment['job_id'] ?? null, 'applicant_id' => $directPayment['applicant_id'] ?? null]
+            );
+        }
+
+        $ipnPayment = $this->db->getOne(
+            'SELECT ip.*, io.ipn_user_id, io.title
+             FROM ipn_payments ip
+             INNER JOIN ipn_opportunities io ON io.id = ip.opportunity_id
+             WHERE ip.paystack_reference = ? AND ip.status <> ?
+             LIMIT 1',
+            [$reference, 'success']
+        );
+
+        if ($ipnPayment && (float)$ipnPayment['ipn_share_ngn'] > 0) {
+            $this->upsertIpnWallet((string)$ipnPayment['ipn_user_id'], (float)$ipnPayment['ipn_share_ngn']);
+            $this->recordWalletCredit(
+                (string)$ipnPayment['ipn_user_id'],
+                'earning',
+                (float)$ipnPayment['ipn_share_ngn'],
+                'IPN application fee share: ' . $this->shortText((string)($ipnPayment['title'] ?? 'Opportunity'), 80),
+                "{$reference}_ipn",
+                'ipn_application_fee',
+                ['opportunity_id' => $ipnPayment['opportunity_id'] ?? null, 'applicant_id' => $ipnPayment['applicant_id'] ?? null]
+            );
+        }
+    }
+
+    private function upsertIndustryEarningWallet(string $userId, float $amount): void {
+        $now = date('Y-m-d H:i:s');
+        $wallet = $this->db->getOne('SELECT id FROM industry_wallet WHERE user_id = ? LIMIT 1', [$userId]);
+        if ($wallet) {
+            $this->db->execute(
+                'UPDATE industry_wallet SET balance = COALESCE(balance, 0) + ?, updated_at = ? WHERE user_id = ?',
+                [$amount, $now, $userId]
+            );
+            return;
+        }
+
+        $this->db->execute(
+            'INSERT INTO industry_wallet (id, user_id, balance, total_funded, total_spent, currency, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [generateUUID(), $userId, $amount, 0, 0, 'NGN', $now, $now]
+        );
+    }
+
     private function recordWalletTransaction(string $userId, string $type, float $amount, string $description, string $reference): void {
+        $transactionType = in_array($type, ['payment', 'withdrawal', 'refund', 'earning', 'adjustment', 'credit', 'debit'], true)
+            ? $type
+            : 'credit';
+
         $this->db->execute(
             'INSERT INTO wallet_transactions (id, user_id, transaction_type, type, amount, currency, description, reference, source, status, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [generateUUID(), $userId, $type, 'credit', $amount, 'NGN', $description, $reference, 'paystack', 'completed', date('Y-m-d H:i:s')]
+            [generateUUID(), $userId, $transactionType, 'credit', $amount, 'NGN', $description, $reference, $type, 'completed', date('Y-m-d H:i:s')]
         );
+    }
+
+    private function distributeDownloadCommission(array $paper, string $downloaderId, int $creditCost): array {
+        $grossAmount = round($creditCost * $this->downloadCreditUnitValue(), 2);
+        if ($grossAmount <= 0) {
+            return ['gross_amount' => 0, 'currency' => 'NGN'];
+        }
+
+        $shares = $this->normalizedDownloadShares();
+        $authorId = (string)($paper['author_id'] ?? '');
+        if ($authorId === '') {
+            throw new \RuntimeException('Research owner not found for download commission');
+        }
+
+        $supervisorId = $this->paperSupervisorId($paper);
+        $institutionId = $this->paperInstitutionId($paper);
+        $reference = $this->makeReference('download');
+        $title = $this->shortText((string)($paper['title'] ?? 'research paper'), 80);
+
+        $studentAmount = $this->shareAmount($grossAmount, $shares['student']);
+        $supervisorAmount = $this->shareAmount($grossAmount, $shares['supervisor']);
+        $institutionAmount = $this->shareAmount($grossAmount, $shares['institution']);
+        $platformAmount = max(0, round($grossAmount - $studentAmount - $supervisorAmount - $institutionAmount, 2));
+
+        if (!$supervisorId && $supervisorAmount > 0) {
+            $studentAmount += $supervisorAmount;
+            $supervisorAmount = 0;
+        }
+
+        if (!$institutionId && $institutionAmount > 0) {
+            $studentAmount += $institutionAmount;
+            $institutionAmount = 0;
+        }
+
+        $studentAmount = round($studentAmount, 2);
+        if ($studentAmount > 0) {
+            $this->upsertStudentWallet($authorId, $studentAmount);
+            $this->recordWalletCredit(
+                $authorId,
+                'earning',
+                $studentAmount,
+                "Download earning for {$title}",
+                "{$reference}_owner",
+                'research_download',
+                [
+                    'research_id' => $paper['id'] ?? null,
+                    'downloader_id' => $downloaderId,
+                    'credits_used' => $creditCost,
+                    'share' => 'owner',
+                ]
+            );
+        }
+
+        if ($supervisorId && $supervisorAmount > 0) {
+            try {
+                $this->upsertSupervisorWallet($supervisorId, $supervisorAmount);
+                $this->recordCommissionEarning($supervisorId, 'supervisor', $authorId, null, $supervisorAmount, $shares['supervisor']);
+                $this->recordWalletCredit(
+                    $supervisorId,
+                    'earning',
+                    $supervisorAmount,
+                    "Supervisor download commission for {$title}",
+                    "{$reference}_supervisor",
+                    'research_download',
+                    ['research_id' => $paper['id'] ?? null, 'downloader_id' => $downloaderId, 'share' => 'supervisor']
+                );
+            } catch (\Throwable $e) {
+                error_log('Supervisor download commission failed: ' . $e->getMessage());
+                $this->upsertStudentWallet($authorId, $supervisorAmount);
+                $this->recordWalletCredit(
+                    $authorId,
+                    'earning',
+                    $supervisorAmount,
+                    "Download earning fallback for {$title}",
+                    "{$reference}_supervisor_fallback",
+                    'research_download',
+                    ['research_id' => $paper['id'] ?? null, 'downloader_id' => $downloaderId, 'share' => 'supervisor_fallback']
+                );
+                $studentAmount = round($studentAmount + $supervisorAmount, 2);
+                $supervisorAmount = 0;
+            }
+        }
+
+        if ($institutionId && $institutionAmount > 0) {
+            try {
+                $this->creditInstitutionCommission($institutionId, $authorId, null, $institutionAmount, $shares['institution']);
+            } catch (\Throwable $e) {
+                error_log('Institution download commission failed: ' . $e->getMessage());
+                $this->upsertStudentWallet($authorId, $institutionAmount);
+                $this->recordWalletCredit(
+                    $authorId,
+                    'earning',
+                    $institutionAmount,
+                    "Download earning fallback for {$title}",
+                    "{$reference}_institution_fallback",
+                    'research_download',
+                    ['research_id' => $paper['id'] ?? null, 'downloader_id' => $downloaderId, 'share' => 'institution_fallback']
+                );
+                $studentAmount = round($studentAmount + $institutionAmount, 2);
+                $institutionAmount = 0;
+            }
+        }
+
+        return [
+            'gross_amount' => $grossAmount,
+            'owner_amount' => $studentAmount,
+            'supervisor_amount' => $supervisorAmount,
+            'institution_amount' => $institutionAmount,
+            'platform_amount' => $platformAmount,
+            'currency' => 'NGN',
+        ];
+    }
+
+    private function distributeSubscriptionCommissions(string $subscriberId, string $subscriptionId, float $amount, string $reference): void {
+        if ($amount <= 0) {
+            return;
+        }
+
+        $profile = $this->db->getOne(
+            'SELECT assigned_supervisor_id, institution_id FROM profiles WHERE user_id = ? LIMIT 1',
+            [$subscriberId]
+        ) ?: [];
+
+        $supervisorRate = $this->platformSettingNumber('supervisor_commission_rate', 5);
+        $institutionRate = $this->platformSettingNumber('institution_commission_rate', 10);
+        $referrerRate = $this->platformSettingNumber('referrer_commission_rate', 5);
+
+        $supervisorId = (string)($profile['assigned_supervisor_id'] ?? '');
+        if ($supervisorId !== '' && $supervisorId !== $subscriberId) {
+            $commission = $this->shareAmount($amount, $supervisorRate);
+            if ($commission > 0) {
+                $this->upsertSupervisorWallet($supervisorId, $commission);
+                $this->recordCommissionEarning($supervisorId, 'supervisor', $subscriberId, $subscriptionId, $commission, $supervisorRate);
+                $this->recordWalletCredit($supervisorId, 'earning', $commission, 'Student subscription commission', "{$reference}_supervisor", 'subscription_commission', ['subscriber_id' => $subscriberId, 'subscription_id' => $subscriptionId]);
+            }
+        }
+
+        $institutionId = (string)($profile['institution_id'] ?? '');
+        if ($institutionId !== '') {
+            $commission = $this->shareAmount($amount, $institutionRate);
+            if ($commission > 0) {
+                $this->creditInstitutionCommission($institutionId, $subscriberId, $subscriptionId, $commission, $institutionRate);
+            }
+        }
+
+        $referrerId = $this->referrerForUser($subscriberId);
+        if ($referrerId && $referrerId !== $subscriberId) {
+            $commission = $this->shareAmount($amount, $referrerRate);
+            if ($commission > 0) {
+                $this->creditUserEarningWallet($referrerId, $commission);
+                $this->recordCommissionEarning($referrerId, 'referrer', $subscriberId, $subscriptionId, $commission, $referrerRate);
+                $this->recordWalletCredit($referrerId, 'earning', $commission, 'Referral subscription commission', "{$reference}_referrer", 'referral_commission', ['subscriber_id' => $subscriberId, 'subscription_id' => $subscriptionId]);
+            }
+        }
+    }
+
+    private function upsertStudentWallet(string $userId, float $amount): void {
+        $now = date('Y-m-d H:i:s');
+        $wallet = $this->db->getOne('SELECT id FROM student_wallet WHERE user_id = ? LIMIT 1', [$userId]);
+        $columns = $this->tableColumns('student_wallet');
+        if ($wallet) {
+            $sets = ['balance = COALESCE(balance, 0) + ?'];
+            $params = [$amount];
+            if (isset($columns['total_earned'])) {
+                $sets[] = 'total_earned = COALESCE(total_earned, 0) + ?';
+                $params[] = $amount;
+            }
+            if (isset($columns['updated_at'])) {
+                $sets[] = 'updated_at = ?';
+                $params[] = $now;
+            }
+            $params[] = $userId;
+            $this->db->execute('UPDATE student_wallet SET ' . implode(', ', $sets) . ' WHERE user_id = ?', $params);
+            return;
+        }
+
+        $this->insertAvailableColumns('student_wallet', [
+            'id' => generateUUID(),
+            'user_id' => $userId,
+            'balance' => $amount,
+            'total_earned' => $amount,
+            'currency' => 'NGN',
+            'created_at' => $now,
+            'updated_at' => $now,
+        ], $columns);
+    }
+
+    private function upsertSupervisorWallet(string $userId, float $amount): void {
+        $now = date('Y-m-d H:i:s');
+        $wallet = $this->db->getOne('SELECT id FROM supervisor_wallet WHERE user_id = ? LIMIT 1', [$userId]);
+        if ($wallet) {
+            $this->db->execute(
+                'UPDATE supervisor_wallet SET balance = COALESCE(balance, 0) + ?, total_earned = COALESCE(total_earned, 0) + ?, updated_at = ? WHERE user_id = ?',
+                [$amount, $amount, $now, $userId]
+            );
+            return;
+        }
+
+        $this->db->execute(
+            'INSERT INTO supervisor_wallet (id, user_id, balance, total_earned, currency, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [generateUUID(), $userId, $amount, $amount, 'NGN', $now, $now]
+        );
+    }
+
+    private function creditUserEarningWallet(string $userId, float $amount): void {
+        $role = $this->roleForUser($userId);
+        if ($role === 'supervisor') {
+            $this->upsertSupervisorWallet($userId, $amount);
+            return;
+        }
+        if ($role === 'ipn_user') {
+            $this->upsertIpnWallet($userId, $amount);
+            return;
+        }
+        $this->upsertStudentWallet($userId, $amount);
+    }
+
+    private function upsertIpnWallet(string $userId, float $amount): void {
+        $now = date('Y-m-d H:i:s');
+        $wallet = $this->db->getOne('SELECT id FROM ipn_wallet WHERE user_id = ? LIMIT 1', [$userId]);
+        if ($wallet) {
+            $this->db->execute(
+                'UPDATE ipn_wallet SET balance = COALESCE(balance, 0) + ?, total_earned = COALESCE(total_earned, 0) + ?, updated_at = ? WHERE user_id = ?',
+                [$amount, $amount, $now, $userId]
+            );
+            return;
+        }
+
+        $this->db->execute(
+            'INSERT INTO ipn_wallet (id, user_id, balance, total_earned, currency, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [generateUUID(), $userId, $amount, $amount, 'NGN', $now, $now]
+        );
+    }
+
+    private function creditInstitutionCommission(string $institutionId, string $researcherId, ?string $subscriptionId, float $amount, float $rate): void {
+        $now = date('Y-m-d H:i:s');
+        $this->db->execute(
+            'UPDATE institutions SET available_balance = COALESCE(available_balance, 0) + ?, total_commission = COALESCE(total_commission, 0) + ?, updated_at = ? WHERE id = ?',
+            [$amount, $amount, $now, $institutionId]
+        );
+
+        try {
+            $columns = $this->tableColumns('institution_commissions');
+            if (!$columns) {
+                return;
+            }
+
+            $values = [
+                'id' => generateUUID(),
+                'institution_id' => $institutionId,
+                'researcher_id' => $researcherId,
+                'subscription_id' => $subscriptionId,
+                'amount' => $amount,
+                'commission_rate' => $rate,
+                'currency' => 'NGN',
+                'status' => 'completed',
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+            $this->insertAvailableColumns('institution_commissions', $values, $columns);
+        } catch (\Throwable $e) {
+            error_log('Institution commission record failed: ' . $e->getMessage());
+        }
+    }
+
+    private function recordWalletCredit(string $userId, string $transactionType, float $amount, string $description, string $reference, string $source, array $metadata = []): void {
+        try {
+            $columns = $this->tableColumns('wallet_transactions');
+            if (!$columns) {
+                return;
+            }
+
+            $allowedTypes = ['payment', 'withdrawal', 'refund', 'earning', 'adjustment', 'credit', 'debit'];
+            $safeTransactionType = in_array($transactionType, $allowedTypes, true) ? $transactionType : 'credit';
+            $now = date('Y-m-d H:i:s');
+            $values = [
+                'id' => generateUUID(),
+                'user_id' => $userId,
+                'transaction_type' => $safeTransactionType,
+                'type' => 'credit',
+                'amount' => $amount,
+                'currency' => 'NGN',
+                'description' => $description,
+                'reference' => $reference,
+                'source' => $source,
+                'status' => 'completed',
+                'metadata' => $metadata,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+            $this->insertAvailableColumns('wallet_transactions', $values, $columns);
+        } catch (\Throwable $e) {
+            error_log('Wallet transaction record failed: ' . $e->getMessage());
+        }
+    }
+
+    private function recordCommissionEarning(string $beneficiaryId, string $beneficiaryType, string $studentId, ?string $subscriptionId, float $amount, float $rate): void {
+        try {
+            $this->db->execute(
+                'INSERT INTO commission_earnings (id, beneficiary_id, beneficiary_type, student_id, subscription_id, amount, commission_rate, currency, status, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [generateUUID(), $beneficiaryId, $beneficiaryType, $studentId, $subscriptionId, $amount, $rate, 'NGN', 'completed', date('Y-m-d H:i:s')]
+            );
+        } catch (\Throwable $e) {
+            error_log('Commission earning record failed: ' . $e->getMessage());
+        }
+    }
+
+    private function paperSupervisorId(array $paper): ?string {
+        if (!empty($paper['supervisor_id'])) {
+            return (string)$paper['supervisor_id'];
+        }
+
+        $profile = $this->db->getOne('SELECT assigned_supervisor_id FROM profiles WHERE user_id = ? LIMIT 1', [(string)($paper['author_id'] ?? '')]);
+        return !empty($profile['assigned_supervisor_id']) ? (string)$profile['assigned_supervisor_id'] : null;
+    }
+
+    private function paperInstitutionId(array $paper): ?string {
+        if (!empty($paper['institution_id'])) {
+            return (string)$paper['institution_id'];
+        }
+
+        $profile = $this->db->getOne('SELECT institution_id FROM profiles WHERE user_id = ? LIMIT 1', [(string)($paper['author_id'] ?? '')]);
+        return !empty($profile['institution_id']) ? (string)$profile['institution_id'] : null;
+    }
+
+    private function referrerForUser(string $userId): ?string {
+        try {
+            $usage = $this->db->getOne('SELECT referrer_id FROM referral_usages WHERE referred_user_id = ? LIMIT 1', [$userId]);
+            return !empty($usage['referrer_id']) ? (string)$usage['referrer_id'] : null;
+        } catch (\Throwable $e) {
+            error_log('Referral lookup failed: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    private function downloadCreditUnitValue(): float {
+        try {
+            $row = $this->db->getOne(
+                'SELECT MIN(amount_ngn / NULLIF(credits, 0)) AS unit_value FROM credit_topup_packages WHERE is_active = 1 AND credits > 0 AND amount_ngn > 0'
+            );
+            $unitValue = (float)($row['unit_value'] ?? 0);
+            return $unitValue > 0 ? round($unitValue, 4) : 1.0;
+        } catch (\Throwable $e) {
+            error_log('Credit unit value lookup failed: ' . $e->getMessage());
+            return 1.0;
+        }
+    }
+
+    private function normalizedDownloadShares(): array {
+        $shares = [
+            'student' => $this->platformSettingNumber('download_student_share', 50),
+            'supervisor' => $this->platformSettingNumber('download_supervisor_share', 20),
+            'institution' => $this->platformSettingNumber('download_institution_share', 20),
+            'platform' => $this->platformSettingNumber('download_platform_share', 10),
+        ];
+
+        $total = array_sum($shares);
+        if ($total <= 0) {
+            return ['student' => 100.0, 'supervisor' => 0.0, 'institution' => 0.0, 'platform' => 0.0];
+        }
+
+        if (abs($total - 100.0) < 0.01) {
+            return $shares;
+        }
+
+        foreach ($shares as $key => $value) {
+            $shares[$key] = ($value / $total) * 100;
+        }
+
+        return $shares;
+    }
+
+    private function platformSettingNumber(string $key, float $default): float {
+        try {
+            $row = $this->db->getOne('SELECT value FROM platform_settings WHERE `key` = ? LIMIT 1', [$key]);
+            if (!$row || $row['value'] === null || $row['value'] === '') {
+                return $default;
+            }
+            return max(0.0, min(100.0, (float)$row['value']));
+        } catch (\Throwable $e) {
+            error_log("Platform setting lookup failed for {$key}: " . $e->getMessage());
+            return $default;
+        }
+    }
+
+    private function shareAmount(float $amount, float $rate): float {
+        return round($amount * max(0, $rate) / 100, 2);
+    }
+
+    private function tableColumns(string $table): array {
+        static $cache = [];
+        $safeTable = preg_replace('/[^a-zA-Z0-9_]/', '', $table);
+        if ($safeTable === '') {
+            return [];
+        }
+
+        if (array_key_exists($safeTable, $cache)) {
+            return $cache[$safeTable];
+        }
+
+        try {
+            $rows = $this->db->getAll("SHOW COLUMNS FROM `{$safeTable}`");
+            $cache[$safeTable] = array_flip(array_map(static fn($row) => $row['Field'], $rows));
+        } catch (\Throwable $e) {
+            error_log("Column lookup failed for {$safeTable}: " . $e->getMessage());
+            $cache[$safeTable] = [];
+        }
+
+        return $cache[$safeTable];
+    }
+
+    private function insertAvailableColumns(string $table, array $values, array $columns): void {
+        $safeTable = preg_replace('/[^a-zA-Z0-9_]/', '', $table);
+        $insert = [];
+        foreach ($values as $column => $value) {
+            if (isset($columns[$column])) {
+                $insert[$column] = $value;
+            }
+        }
+
+        if ($safeTable === '' || !$insert) {
+            return;
+        }
+
+        $quotedColumns = implode(', ', array_map(static fn($column) => "`{$column}`", array_keys($insert)));
+        $placeholders = implode(', ', array_fill(0, count($insert), '?'));
+        $this->db->execute(
+            "INSERT INTO `{$safeTable}` ({$quotedColumns}) VALUES ({$placeholders})",
+            array_values($insert)
+        );
+    }
+
+    private function sendRelatedResearchDigest(): int {
+        $sent = 0;
+        foreach ($this->digestUsers(['researcher']) as $researcher) {
+            $matches = $this->relatedResearchForUser($researcher);
+            if (!$matches) {
+                continue;
+            }
+
+            $name = (string)($researcher['full_name'] ?? 'Researcher');
+            $cards = '';
+            foreach ($matches as $paper) {
+                $title = $this->escape((string)$paper['title']);
+                $author = $this->escape((string)($paper['author_name'] ?? 'A researcher'));
+                $field = $this->escape((string)($paper['research_field'] ?: $paper['category'] ?: $paper['author_department'] ?: 'Related research'));
+                $date = $this->escape(date('M j, Y', strtotime((string)($paper['posted_at'] ?? 'now'))));
+                $description = $this->shortText((string)($paper['abstract'] ?: $paper['description'] ?: 'Open this research to review the details and connect with the author.'), 180);
+                $link = $this->absoluteAppUrl('/research/' . $paper['id']);
+                $cards .= "
+                    <div style=\"border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:14px 0;background:#f8fafc;\">
+                        <p style=\"margin:0 0 8px;font-size:17px;color:#0f172a;font-weight:700;\">{$title}</p>
+                        <p style=\"margin:0 0 8px;font-size:14px;color:#475569;\">By {$author} &bull; {$field} &bull; {$date}</p>
+                        <p style=\"margin:0;font-size:15px;color:#334155;line-height:1.5;\">{$this->escape($description)}</p>
+                        <p style=\"margin:14px 0 0;\"><a href=\"{$this->escape($link)}\" style=\"color:#2563eb;font-weight:600;text-decoration:none;\">View research</a></p>
+                    </div>
+                ";
+            }
+
+            $html = $this->baseEmailHtml('Related research posted on R2P Connect', "
+                <p style=\"font-size:16px;color:#334155;\">Hello {$this->escape($name)},</p>
+                <p style=\"font-size:16px;color:#334155;\">Researchers have posted work that appears related to your department, interests, or previous research activity.</p>
+                {$cards}
+                {$this->buttonHtml('/research', 'Browse More Research')}
+            ");
+
+            $this->sendZeptoMail((string)$researcher['email'], $name, 'Related research you may want to review', $html);
+            $sent++;
+        }
+
+        return $sent;
+    }
+
+    private function sendResearchTipsDigest(): int {
+        $sent = 0;
+        $content = $this->researchTipContent();
+
+        foreach ($this->digestUsers(['researcher']) as $researcher) {
+            $name = (string)($researcher['full_name'] ?? 'Researcher');
+            $tips = '';
+            foreach ($content['tips'] as $tip) {
+                $tips .= "<li style=\"margin:10px 0;color:#334155;font-size:15px;line-height:1.5;\">{$this->escape($tip)}</li>";
+            }
+
+            $html = $this->baseEmailHtml('A quick research improvement note', "
+                <p style=\"font-size:16px;color:#334155;\">Hello {$this->escape($name)},</p>
+                <p style=\"font-size:16px;color:#334155;\">Here are a few practical reminders to strengthen your next research update.</p>
+                <ul style=\"padding-left:22px;margin:16px 0;\">{$tips}</ul>
+                <div style=\"background:#eff6ff;border-left:4px solid #2563eb;border-radius:10px;padding:16px;margin:22px 0;\">
+                    <p style=\"font-size:16px;color:#1e3a8a;margin:0 0 8px;font-weight:700;\">Research quote</p>
+                    <p style=\"font-size:16px;color:#334155;margin:0;line-height:1.5;\">\"{$this->escape($content['quote'])}\"</p>
+                    <p style=\"font-size:14px;color:#64748b;margin:10px 0 0;\">- {$this->escape($content['author'])}</p>
+                </div>
+                {$this->buttonHtml('/dashboard/research', 'Improve My Research')}
+            ");
+
+            $this->sendZeptoMail((string)$researcher['email'], $name, 'Research tips for stronger work', $html);
+            $sent++;
+        }
+
+        return $sent;
+    }
+
+    private function sendIndustryHiringDigest(): int {
+        $sent = 0;
+        foreach ($this->digestUsers(['industry', 'ipn_user', 'ipn']) as $industry) {
+            $name = (string)($industry['full_name'] ?? 'Industry Partner');
+            $html = $this->baseEmailHtml('Hire students and collaborate with researchers', "
+                <p style=\"font-size:16px;color:#334155;\">Hello {$this->escape($name)},</p>
+                <p style=\"font-size:16px;color:#334155;\">R2P Connect helps industry partners find students for SIWES, Industrial Training, internships, part-time roles, and entry-level opportunities.</p>
+                <div style=\"background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:18px 0;\">
+                    <p style=\"font-size:16px;color:#0f172a;font-weight:700;margin:0 0 10px;\">Ways to get value this week</p>
+                    <ul style=\"padding-left:22px;margin:0;\">
+                        <li style=\"margin:9px 0;color:#334155;\">Post SIWES, IT, internship, and part-time openings for verified students.</li>
+                        <li style=\"margin:9px 0;color:#334155;\">Browse published research to identify practical solutions for your business needs.</li>
+                        <li style=\"margin:9px 0;color:#334155;\">Invite researchers from institutions to explore pilots, product tests, and consultancy projects.</li>
+                        <li style=\"margin:9px 0;color:#334155;\">Use clear role requirements so the best students and departments can respond quickly.</li>
+                    </ul>
+                </div>
+                <p style=\"font-size:16px;color:#334155;\">A small collaboration with a department can become a steady pipeline of skilled students and practical research insight.</p>
+                {$this->buttonHtml('/industry/job-postings', 'Post a Hiring Need')}
+                {$this->buttonHtml('/industry/researchers', 'Find Researchers')}
+            ");
+
+            $this->sendZeptoMail((string)$industry['email'], $name, 'Find SIWES, IT students and research collaborators', $html);
+            $sent++;
+        }
+
+        return $sent;
+    }
+
+    private function digestUsers(array $roles): array {
+        $placeholders = implode(',', array_fill(0, count($roles), '?'));
+        $limit = max(1, min(5000, (int)env('CRON_EMAIL_LIMIT', 1000)));
+        $sql = "
+            SELECT p.user_id, p.full_name, p.email, p.department, p.fields_of_interest, p.skills, ur.role
+            FROM profiles p
+            INNER JOIN user_roles ur ON ur.user_id = p.user_id
+            INNER JOIN users u ON u.id = p.user_id
+            WHERE ur.role IN ({$placeholders})
+              AND p.email IS NOT NULL
+              AND p.email <> ''
+              AND (u.status IS NULL OR u.status = 'active')
+              AND u.deleted_at IS NULL
+            ORDER BY p.created_at ASC
+            LIMIT {$limit}
+        ";
+
+        return array_values(array_filter(
+            $this->db->getAll($sql, $roles),
+            fn($user) => $this->isEmail((string)($user['email'] ?? ''))
+        ));
+    }
+
+    private function relatedResearchForUser(array $researcher): array {
+        $terms = $this->digestTermsForUser($researcher);
+        $papers = $this->db->getAll(
+            "SELECT rp.id, rp.title, rp.description, rp.abstract, rp.keywords, rp.research_field, rp.category,
+                    COALESCE(rp.published_at, rp.created_at) AS posted_at,
+                    p.full_name AS author_name, p.department AS author_department
+             FROM research_papers rp
+             LEFT JOIN profiles p ON p.user_id = rp.author_id
+             WHERE rp.author_id <> ?
+               AND rp.status IN ('published', 'approved', 'submitted', 'under_review')
+             ORDER BY COALESCE(rp.published_at, rp.created_at) DESC
+             LIMIT 80",
+            [(string)$researcher['user_id']]
+        );
+
+        $scored = [];
+        foreach ($papers as $paper) {
+            $haystack = strtolower(implode(' ', [
+                (string)($paper['title'] ?? ''),
+                (string)($paper['description'] ?? ''),
+                (string)($paper['abstract'] ?? ''),
+                (string)($paper['research_field'] ?? ''),
+                (string)($paper['category'] ?? ''),
+                (string)($paper['author_department'] ?? ''),
+                implode(' ', $this->jsonList($paper['keywords'] ?? null)),
+            ]));
+
+            $score = 0;
+            foreach ($terms as $term) {
+                if ($term !== '' && str_contains($haystack, strtolower($term))) {
+                    $score++;
+                }
+            }
+
+            if (!$terms || $score > 0) {
+                $paper['_score'] = $score;
+                $scored[] = $paper;
+            }
+        }
+
+        usort($scored, fn($a, $b) => (($b['_score'] ?? 0) <=> ($a['_score'] ?? 0)) ?: strcmp((string)($b['posted_at'] ?? ''), (string)($a['posted_at'] ?? '')));
+        return array_slice($scored, 0, 3);
+    }
+
+    private function digestTermsForUser(array $user): array {
+        $terms = [];
+        foreach (['department'] as $field) {
+            $value = trim((string)($user[$field] ?? ''));
+            if ($value !== '') {
+                $terms[] = $value;
+            }
+        }
+
+        $terms = array_merge($terms, $this->jsonList($user['fields_of_interest'] ?? null), $this->jsonList($user['skills'] ?? null));
+        $ownPapers = $this->db->getAll(
+            "SELECT keywords, research_field, category
+             FROM research_papers
+             WHERE author_id = ?
+             ORDER BY created_at DESC
+             LIMIT 5",
+            [(string)$user['user_id']]
+        );
+
+        foreach ($ownPapers as $paper) {
+            $terms = array_merge($terms, $this->jsonList($paper['keywords'] ?? null));
+            foreach (['research_field', 'category'] as $field) {
+                $value = trim((string)($paper[$field] ?? ''));
+                if ($value !== '') {
+                    $terms[] = $value;
+                }
+            }
+        }
+
+        $clean = [];
+        foreach ($terms as $term) {
+            $term = trim((string)$term);
+            if ($term !== '' && strlen($term) >= 3) {
+                $clean[strtolower($term)] = $term;
+            }
+        }
+
+        return array_values($clean);
+    }
+
+    private function researchTipContent(): array {
+        $tips = [
+            'Make your problem statement specific: name the affected group, the context, and the evidence that shows the problem matters.',
+            'Connect every objective to your methodology so readers can see exactly how each research question will be answered.',
+            'Keep a short research log after each reading or data session; it makes your discussion chapter much easier to write.',
+            'Use recent sources, but keep landmark studies in view so your literature review shows both history and current direction.',
+            'Before submitting, check whether your conclusion answers the same questions your introduction promised to investigate.',
+        ];
+
+        $quotes = [
+            ['quote' => 'The important thing is not to stop questioning.', 'author' => 'Albert Einstein'],
+            ['quote' => 'Be less curious about people and more curious about ideas.', 'author' => 'Marie Curie'],
+            ['quote' => 'Nothing in life is to be feared, it is only to be understood.', 'author' => 'Marie Curie'],
+            ['quote' => 'We explore because we are curious.', 'author' => 'Brian Cox'],
+            ['quote' => 'You do not know what you will find.', 'author' => 'Alexander Fleming'],
+        ];
+
+        $quote = $quotes[((int)date('z')) % count($quotes)];
+        return ['tips' => $tips, 'quote' => $quote['quote'], 'author' => $quote['author']];
+    }
+
+    private function jsonList($value): array {
+        if (is_array($value)) {
+            return array_values(array_filter(array_map('strval', $value)));
+        }
+
+        if (!is_string($value) || trim($value) === '') {
+            return [];
+        }
+
+        $decoded = json_decode($value, true);
+        if (is_array($decoded)) {
+            return array_values(array_filter(array_map('strval', $decoded)));
+        }
+
+        return array_values(array_filter(array_map('trim', explode(',', $value))));
+    }
+
+    private function shortText(string $text, int $maxLength): string {
+        $text = trim(preg_replace('/\s+/', ' ', strip_tags($text)) ?: '');
+        if (strlen($text) <= $maxLength) {
+            return $text;
+        }
+
+        return rtrim(substr($text, 0, $maxLength - 3)) . '...';
     }
 
     private function sendZeptoMail(string $to, string $toName, string $subject, string $html): array {
@@ -1415,13 +3066,23 @@ class FunctionController extends Controller {
                 $adminName = (string)($data['adminName'] ?? 'Admin');
                 $supervisorName = (string)($data['supervisorName'] ?? 'A supervisor');
                 $supervisorEmail = (string)($data['supervisorEmail'] ?? '');
+                $institutionName = (string)($data['institutionName'] ?? '');
+                $department = (string)($data['department'] ?? '');
+                $academicRank = (string)($data['academicRank'] ?? '');
+                $staffId = (string)($data['staffId'] ?? '');
+                $ctaUrl = (string)($data['ctaUrl'] ?? '/institution/supervisors');
+                $ctaText = (string)($data['ctaText'] ?? 'View Supervisors');
                 return [
-                    'subject' => 'Supervisor registration completed',
+                    'subject' => 'Supervisor verification required',
                     'html' => $this->baseEmailHtml('Supervisor registered', "
                         <p style=\"font-size:16px;color:#334155;\">Hello {$this->escape($adminName)},</p>
-                        <p style=\"font-size:16px;color:#334155;\">{$this->escape($supervisorName)} has completed supervisor registration.</p>
+                        <p style=\"font-size:16px;color:#334155;\">{$this->escape($supervisorName)} has completed supervisor registration and is waiting for confirmation and verification.</p>
                         " . ($supervisorEmail !== '' ? "<p style=\"font-size:16px;color:#334155;\">Email: {$this->escape($supervisorEmail)}</p>" : '') . "
-                        {$this->buttonHtml('/institution/supervisors', 'View Supervisors')}
+                        " . ($institutionName !== '' ? "<p style=\"font-size:16px;color:#334155;\">Institution: {$this->escape($institutionName)}</p>" : '') . "
+                        " . ($department !== '' ? "<p style=\"font-size:16px;color:#334155;\">Department: {$this->escape($department)}</p>" : '') . "
+                        " . ($academicRank !== '' ? "<p style=\"font-size:16px;color:#334155;\">Academic rank: {$this->escape($academicRank)}</p>" : '') . "
+                        " . ($staffId !== '' ? "<p style=\"font-size:16px;color:#334155;\">Staff ID: {$this->escape($staffId)}</p>" : '') . "
+                        {$this->buttonHtml($ctaUrl, $ctaText)}
                     "),
                 ];
 
@@ -1496,6 +3157,22 @@ class FunctionController extends Controller {
                     "),
                 ];
 
+            case 'student_message':
+                $supervisorName = (string)($data['supervisorName'] ?? 'Supervisor');
+                $studentName = (string)($data['studentName'] ?? 'A student');
+                $studentId = (string)($data['studentId'] ?? '');
+                $preview = (string)($data['messagePreview'] ?? 'You have a new message.');
+                $link = $studentId !== '' ? "/supervisor/students/{$studentId}" : '/supervisor/students';
+                return [
+                    'subject' => 'New message from a student',
+                    'html' => $this->baseEmailHtml('New student message', "
+                        <p style=\"font-size:16px;color:#334155;\">Hello {$this->escape($supervisorName)},</p>
+                        <p style=\"font-size:16px;color:#334155;\">{$this->escape($studentName)} sent you a message.</p>
+                        <div style=\"background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;margin:18px 0;color:#334155;white-space:pre-wrap;\">{$this->escape($preview)}</div>
+                        {$this->buttonHtml($link, 'Open Student Chat')}
+                    "),
+                ];
+
             case 'generic':
             default:
                 if ($message === '' && isset($data['html'])) {
@@ -1560,14 +3237,203 @@ class FunctionController extends Controller {
         return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
-    private function researchPrompt(string $type, string $content): string {
+    private function normalizeDepartmentNames(array $names): array {
+        $clean = [];
+        foreach ($names as $name) {
+            $name = trim((string)$name);
+            $name = preg_replace('/\s+/', ' ', $name) ?: '';
+            $name = preg_replace('/^(department|dept\.?)\s+of\s+/i', '', $name) ?: $name;
+            if ($name === '' || strlen($name) > 120) {
+                continue;
+            }
+
+            $display = ucwords(strtolower($name));
+            $display = str_replace([' And ', ' Of ', ' For ', ' In '], [' and ', ' of ', ' for ', ' in '], $display);
+            $clean[strtolower($display)] = $display;
+        }
+
+        natcasesort($clean);
+        return array_values($clean);
+    }
+
+    private function departmentSearchContext(string $searchQuery, string $website = ''): string {
+        $chunks = [];
+
+        $baseUrl = $this->normalizeWebsiteUrl($website);
+        if ($baseUrl !== '') {
+            foreach (['', '/departments', '/schools', '/faculties', '/academics', '/academic-programmes'] as $path) {
+                $html = $this->httpGet($baseUrl . $path);
+                $text = $this->htmlToSearchText($html);
+                if ($text !== '' && preg_match('/department|faculty|school|programme|course/i', $text)) {
+                    $chunks[] = "Source {$baseUrl}{$path}:\n" . substr($text, 0, 2500);
+                }
+            }
+        }
+
+        $searchHtml = $this->httpGet('https://duckduckgo.com/html/?q=' . rawurlencode($searchQuery));
+        $searchText = $this->htmlToSearchText($searchHtml);
+        if ($searchText !== '') {
+            $chunks[] = "Search results for {$searchQuery}:\n" . substr($searchText, 0, 4500);
+        }
+
+        return substr(implode("\n\n---\n\n", array_filter($chunks)), 0, 9000);
+    }
+
+    private function normalizeWebsiteUrl(string $website): string {
+        $website = trim($website);
+        if ($website === '') {
+            return '';
+        }
+
+        if (!preg_match('/^https?:\/\//i', $website)) {
+            $website = 'https://' . $website;
+        }
+
+        $parts = parse_url($website);
+        if (!$parts || empty($parts['host'])) {
+            return '';
+        }
+
+        return ($parts['scheme'] ?? 'https') . '://' . $parts['host'];
+    }
+
+    private function httpGet(string $url): string {
+        if (!preg_match('/^https?:\/\//i', $url)) {
+            return '';
+        }
+
+        try {
+            if (function_exists('curl_init')) {
+                $ch = curl_init($url);
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_TIMEOUT => 12,
+                    CURLOPT_CONNECTTIMEOUT => 6,
+                    CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; R2PConnectBot/1.0)',
+                    CURLOPT_SSL_VERIFYPEER => true,
+                    CURLOPT_SSL_VERIFYHOST => 2,
+                ]);
+
+                $body = curl_exec($ch);
+                $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+
+                return is_string($body) && $status >= 200 && $status < 400 ? $body : '';
+            }
+
+            $context = stream_context_create([
+                'http' => [
+                    'method' => 'GET',
+                    'timeout' => 12,
+                    'ignore_errors' => true,
+                    'header' => "User-Agent: Mozilla/5.0 (compatible; R2PConnectBot/1.0)\r\n",
+                ],
+            ]);
+            $body = file_get_contents($url, false, $context);
+            return is_string($body) ? $body : '';
+        } catch (\Throwable $e) {
+            error_log('Department lookup fetch failed for ' . $url . ': ' . $e->getMessage());
+            return '';
+        }
+    }
+
+    private function htmlToSearchText(string $html): string {
+        if ($html === '') {
+            return '';
+        }
+
+        $html = preg_replace('/<script\b[^>]*>.*?<\/script>/is', ' ', $html) ?: $html;
+        $html = preg_replace('/<style\b[^>]*>.*?<\/style>/is', ' ', $html) ?: $html;
+        $text = html_entity_decode(strip_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = preg_replace('/\s+/', ' ', $text) ?: '';
+        return trim($text);
+    }
+
+    private function defaultDepartmentsForSchool(string $schoolName): array {
+        $name = strtolower($schoolName);
+        $departments = [
+            'Accounting',
+            'Agricultural Economics',
+            'Agricultural Extension',
+            'Architecture',
+            'Biochemistry',
+            'Biological Sciences',
+            'Business Administration',
+            'Chemical Engineering',
+            'Chemistry',
+            'Civil Engineering',
+            'Computer Engineering',
+            'Computer Science',
+            'Economics',
+            'Education',
+            'Electrical and Electronics Engineering',
+            'English and Literary Studies',
+            'Estate Management',
+            'Fine and Applied Arts',
+            'Geography',
+            'Guidance and Counselling',
+            'History and International Studies',
+            'Industrial Chemistry',
+            'Law',
+            'Library and Information Science',
+            'Mass Communication',
+            'Mathematics',
+            'Mechanical Engineering',
+            'Microbiology',
+            'Nursing Science',
+            'Physics',
+            'Political Science',
+            'Psychology',
+            'Public Administration',
+            'Public Health',
+            'Sociology',
+            'Statistics',
+        ];
+
+        if (str_contains($name, 'polytechnic') || str_contains($name, 'technology')) {
+            $departments = array_merge($departments, [
+                'Building Technology',
+                'Computer Science Technology',
+                'Quantity Surveying',
+                'Science Laboratory Technology',
+                'Urban and Regional Planning',
+            ]);
+        }
+
+        if (str_contains($name, 'medical') || str_contains($name, 'health') || str_contains($name, 'teaching hospital')) {
+            $departments = array_merge($departments, [
+                'Anatomy',
+                'Community Medicine',
+                'Medical Laboratory Science',
+                'Medicine and Surgery',
+                'Pharmacology',
+                'Physiology',
+                'Radiography',
+            ]);
+        }
+
+        if (str_contains($name, 'education')) {
+            $departments = array_merge($departments, [
+                'Adult Education',
+                'Educational Management',
+                'Science Education',
+                'Social Studies Education',
+                'Vocational and Technical Education',
+            ]);
+        }
+
+        return $this->normalizeDepartmentNames($departments);
+    }
+
+    private function researchPrompt(string $type, string $content, int $requestedCount = 10): string {
         return match ($type) {
             'summarize' => "Summarize this research content clearly:\n\n{$content}",
             'abstract' => "Write a strong academic abstract from this research content:\n\n{$content}",
             'gap_analysis' => "Identify research gaps, unresolved questions, and possible next studies from this content:\n\n{$content}",
             'keywords' => "Extract 8-12 academic keywords and short phrases from this content:\n\n{$content}",
-            'topic_refine' => "Refine this research topic. Suggest improved title options, scope, objectives, and research questions:\n\n{$content}",
-            'topic_suggestions' => "Generate research topic suggestions based on this field or interest:\n\n{$content}",
+            'topic_refine' => "Act as a senior academic research supervisor. Refine this rough idea into exactly {$requestedCount} precise, normal project/research topics with clear scope, originality angle, objectives, research questions, method direction, data sources, and practical tips. Return valid JSON with a top-level topics array containing exactly {$requestedCount} items. If the idea is narrow, create distinct variations by population, location, variables, method, dataset, or novelty angle instead of returning fewer topics. Return JSON only when the user prompt requests JSON:\n\n{$content}",
+            'topic_suggestions' => "Act as a senior Nigerian academic researcher and departmental project coordinator. Generate exactly {$requestedCount} department-based, Nigeria-focused project/research topics that fit the user's department, avoid overworked generic titles, and include reasons, scope, gap/novelty potential, objectives, research questions, method direction, data sources, and practical tips. Return valid JSON with a top-level topics array containing exactly {$requestedCount} items. Cover different practical sub-areas where possible instead of returning fewer topics. Use current-issue reasoning, but do not invent citations or claim live web verification unless search results are provided. Return JSON only when the user prompt requests JSON:\n\n{$content}",
             'applications' => "Identify practical and industrial applications for this research:\n\n{$content}",
             'literature' => "Suggest literature review angles, themes, and search keywords for this research:\n\n{$content}",
             'funding' => "Create a concise funding pitch for this research:\n\n{$content}",
@@ -1576,6 +3442,69 @@ class FunctionController extends Controller {
             'version_comparison' => "Compare these research document versions or notes and summarize changes:\n\n{$content}",
             default => $content,
         };
+    }
+
+    private function researchMaxTokens(string $type, int $requestedCount = 10): int {
+        if (in_array($type, ['topic_refine', 'topic_suggestions'], true)) {
+            return max(3200, $requestedCount * 520);
+        }
+
+        return 1800;
+    }
+
+    private function isTopicResearchType(string $type): bool {
+        return in_array($type, ['topic_refine', 'topic_suggestions'], true);
+    }
+
+    private function ensureTopicResultCount(string $type, string $content, int $requestedCount): string {
+        if ($this->topicCountFromAiText($content) >= $requestedCount) {
+            return $content;
+        }
+
+        $repairPrompt = "The previous response did not contain enough topics.\n\n" .
+            "Previous response:\n{$content}\n\n" .
+            "Return ONLY valid JSON with a top-level topics array containing exactly {$requestedCount} complete topic objects. " .
+            "Keep any strong existing topics, add the missing topics, avoid duplicates, and do not include markdown or commentary.";
+
+        $repaired = $this->chatText(
+            'You repair academic topic JSON. Return JSON only.',
+            $this->researchPrompt($type, $repairPrompt, $requestedCount),
+            ['temperature' => 0.25, 'max_tokens' => $this->researchMaxTokens($type, $requestedCount)]
+        );
+
+        return $repaired['content'];
+    }
+
+    private function topicCountFromAiText(string $text): int {
+        $json = $this->jsonFromText($text);
+        if (!is_array($json)) {
+            return 0;
+        }
+
+        $topics = $json['topics']
+            ?? $json['results']
+            ?? $json['suggestions']
+            ?? $json['refinedTopics']
+            ?? $json['refined_topics']
+            ?? null;
+
+        if (is_array($topics)) {
+            return count(array_filter($topics, 'is_array'));
+        }
+
+        if ($this->isNumericList($json)) {
+            return count(array_filter($json, 'is_array'));
+        }
+
+        return 0;
+    }
+
+    private function isNumericList(array $value): bool {
+        if ($value === []) {
+            return true;
+        }
+
+        return array_keys($value) === range(0, count($value) - 1);
     }
 
     private function chatText(string $system, string $user, array $options = []): array {
@@ -1590,15 +3519,15 @@ class FunctionController extends Controller {
 
         $message = $e->getMessage();
         if (preg_match('/invalid_api_key|incorrect api key|unauthorized|missing API key/i', $message)) {
-            $message = 'AI provider API key is missing or invalid. Please check the AI settings.';
+            $message = 'AI service credentials are missing or invalid. Please check the AI settings.';
         } elseif (preg_match('/insufficient_quota|quota|credit|billing/i', $message)) {
             $message = 'Not Available, Please try again later, our team are working on this issue';
         } elseif (preg_match('/model|not found|does not exist/i', $message)) {
-            $message = 'The selected AI model is not available for the configured provider. Please choose another model in admin settings.';
+            $message = 'The selected AI model is not available. Please choose another model in admin settings.';
         } elseif (preg_match('/timed out|timeout|could not resolve|connection|HTTP request failed/i', $message)) {
-            $message = 'AI provider connection failed. Please try again shortly.';
+            $message = 'AI service connection failed. Please try again shortly.';
         } else {
-            $message = 'AI service is temporarily unavailable. Please check your provider settings or try again.';
+            $message = 'AI service is temporarily unavailable. Please check your AI settings or try again.';
         }
 
         Response::json(['data' => ['error' => $message], 'error' => null]);
@@ -1618,11 +3547,183 @@ class FunctionController extends Controller {
         return null;
     }
 
-    private function decrementUserAICredit(): int {
+    private function normalizeStringList($value): array {
+        if (is_array($value)) {
+            $items = array_values($value);
+        } elseif (is_string($value)) {
+            $trimmed = trim($value);
+            if ($trimmed === '') {
+                return [];
+            }
+
+            $decoded = json_decode($trimmed, true);
+            if (is_array($decoded)) {
+                $items = array_values($decoded);
+            } else {
+                $items = preg_split('/\r?\n|;/', $trimmed) ?: [$trimmed];
+            }
+        } else {
+            return [];
+        }
+
+        return array_values(array_filter(array_map(static function ($item): string {
+            if (is_array($item)) {
+                $fallback = reset($item);
+                $item = $item['text'] ?? $item['content'] ?? $item['description'] ?? $fallback ?: '';
+            }
+
+            return trim((string)$item);
+        }, $items)));
+    }
+
+    private function firstStringList(array $values): array {
+        foreach ($values as $value) {
+            $items = $this->normalizeStringList($value);
+            if ($items) {
+                return $items;
+            }
+        }
+
+        return [];
+    }
+
+    private function defaultWhyItMatters(array $review): array {
+        $issues = $this->firstStringList([
+            $review['weak_areas'] ?? null,
+            $review['required_fixes'] ?? null,
+            $review['recommendations'] ?? null,
+        ]);
+
+        $items = [];
+        foreach (array_slice($issues, 0, 4) as $issue) {
+            $items[] = "This matters academically because {$issue} can affect the chapter's clarity, examiner confidence, and the strength of the research argument.";
+        }
+
+        return $items ?: [
+            "This matters academically because examiners use the chapter to judge whether the study has a clear problem, defensible scope, and logical research direction.",
+            "A stronger academic structure helps the supervisor confirm that the chapter can support the methodology, analysis, and final conclusions.",
+        ];
+    }
+
+    private function defaultExaminerExpectations(string $chapterName): array {
+        $chapter = strtolower($chapterName);
+
+        if (str_contains($chapter, 'methodology')) {
+            return [
+                "A clear research design that matches the topic, objectives, and research questions.",
+                "A justified population, sample, sampling technique, and data collection method.",
+                "Enough procedural detail for another researcher to understand how the study would be carried out.",
+            ];
+        }
+
+        if (str_contains($chapter, 'literature')) {
+            return [
+                "A thematic review that connects sources to the study rather than listing authors one after another.",
+                "A clear research gap showing what previous studies have not fully addressed.",
+                "Recent, relevant, and properly connected literature that supports the study objectives.",
+            ];
+        }
+
+        return [
+            "A clear statement of the problem that shows why the study is necessary.",
+            "Research objectives and questions that align with each other and with the title.",
+            "A scope, significance, and definition of terms that make the study focused and examinable.",
+        ];
+    }
+
+    private function aiCreditCostForMode(string $reviewMode): int {
+        return match ($reviewMode) {
+            'advanced' => 3,
+            'learning' => 2,
+            default => 1,
+        };
+    }
+
+    private function hasEnoughAICredits(string $userId, int $amount = 1): bool {
+        $this->renewResearcherFreeCreditsIfDue($userId);
+        $this->initializeResearcherFreeCreditsIfUnused($userId);
+
+        $subscription = $this->db->getOne(
+            'SELECT ai_credits_remaining FROM subscriptions WHERE user_id = ?',
+            [$userId]
+        );
+
+        if (!$subscription) {
+            return false;
+        }
+
+        return (int)$subscription['ai_credits_remaining'] >= max(1, $amount);
+    }
+
+    private function initializeResearcherFreeCreditsIfUnused(string $userId): void {
+        try {
+            if ($this->roleForUser($userId) !== 'researcher') {
+                return;
+            }
+
+            $subscription = $this->db->getOne('SELECT id, tier, ai_credits_remaining FROM subscriptions WHERE user_id = ? LIMIT 1', [$userId]);
+            $usage = $this->db->getOne('SELECT credits_used FROM ai_credits WHERE user_id = ? LIMIT 1', [$userId]);
+            if ((int)($usage['credits_used'] ?? 0) > 0) {
+                return;
+            }
+
+            $now = date('Y-m-d H:i:s');
+            $end = date('Y-m-d H:i:s', strtotime('+1 month'));
+            if ($subscription) {
+                if ((string)($subscription['tier'] ?? 'free') !== 'free' || (int)($subscription['ai_credits_remaining'] ?? 0) >= self::RESEARCHER_FREE_MONTHLY_CREDITS) {
+                    return;
+                }
+
+                $this->db->execute(
+                    'UPDATE subscriptions SET current_period_start = COALESCE(current_period_start, ?), current_period_end = COALESCE(current_period_end, ?), ai_credits_remaining = ?, is_active = 1, updated_at = ? WHERE id = ?',
+                    [$now, $end, self::RESEARCHER_FREE_MONTHLY_CREDITS, $now, $subscription['id']]
+                );
+                return;
+            }
+
+            $this->db->execute(
+                'INSERT INTO subscriptions (id, user_id, tier, amount, currency, current_period_start, current_period_end, ai_credits_remaining, ai_matchers_remaining, max_challenges_per_month, ai_matches_per_challenge, is_active, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                [generateUUID(), $userId, 'free', 0, 'NGN', $now, $end, self::RESEARCHER_FREE_MONTHLY_CREDITS, 0, 0, 0, 1, $now, $now]
+            );
+        } catch (\Throwable $e) {
+            error_log('Initial free AI credit repair failed: ' . $e->getMessage());
+        }
+    }
+
+    private function addSubscriptionAICredits(string $userId, int $amount): void {
+        $amount = max(0, $amount);
+        if ($userId === '' || $amount === 0) {
+            return;
+        }
+
+        $now = date('Y-m-d H:i:s');
+        $end = date('Y-m-d H:i:s', strtotime('+1 month'));
+        $subscription = $this->db->getOne('SELECT id FROM subscriptions WHERE user_id = ? LIMIT 1', [$userId]);
+
+        if ($subscription) {
+            $this->db->execute(
+                'UPDATE subscriptions SET ai_credits_remaining = COALESCE(ai_credits_remaining, 0) + ?, is_active = 1, updated_at = ? WHERE id = ?',
+                [$amount, $now, $subscription['id']]
+            );
+            return;
+        }
+
+        $this->db->execute(
+            'INSERT INTO subscriptions (id, user_id, tier, amount, currency, current_period_start, current_period_end, ai_credits_remaining, ai_matchers_remaining, max_challenges_per_month, ai_matches_per_challenge, is_active, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [generateUUID(), $userId, 'free', 0, 'NGN', $now, $end, $amount, 0, 0, 0, 1, $now, $now]
+        );
+    }
+
+    private function decrementUserAICredit(int $amount = 1): int {
         $user = $this->getUser();
         if (!$user) {
             return 0;
         }
+
+        $amount = max(1, $amount);
+        $this->renewResearcherFreeCreditsIfDue($user['sub']);
 
         $subscription = $this->db->getOne(
             'SELECT id, ai_credits_remaining FROM subscriptions WHERE user_id = ?',
@@ -1632,10 +3733,54 @@ class FunctionController extends Controller {
             return 0;
         }
 
-        $remaining = max(0, (int)$subscription['ai_credits_remaining'] - 1);
+        $remaining = max(0, (int)$subscription['ai_credits_remaining'] - $amount);
         $this->db->execute('UPDATE subscriptions SET ai_credits_remaining = ? WHERE id = ?', [$remaining, $subscription['id']]);
+        $this->recordAICreditUsage($user['sub'], $amount);
 
         return $remaining;
+    }
+
+    private function renewResearcherFreeCreditsIfDue(string $userId): void {
+        try {
+            $now = date('Y-m-d H:i:s');
+            $end = date('Y-m-d H:i:s', strtotime('+1 month'));
+            $this->db->execute(
+                "UPDATE subscriptions s
+                 INNER JOIN user_roles ur ON ur.user_id = s.user_id
+                 SET s.current_period_start = ?,
+                     s.current_period_end = ?,
+                     s.ai_credits_remaining = ?,
+                     s.is_active = 1,
+                     s.updated_at = ?
+                 WHERE s.user_id = ?
+                   AND s.tier = 'free'
+                   AND ur.role = 'researcher'
+                   AND (s.current_period_end IS NULL OR s.current_period_end < ?)",
+                [$now, $end, self::RESEARCHER_FREE_MONTHLY_CREDITS, $now, $userId, $now]
+            );
+        } catch (\Throwable $e) {
+            error_log('Free credit renewal failed: ' . $e->getMessage());
+        }
+    }
+
+    private function recordAICreditUsage(string $userId, int $amount = 1): void {
+        try {
+            $row = $this->db->getOne('SELECT id, credits_used FROM ai_credits WHERE user_id = ?', [$userId]);
+            if ($row) {
+                $this->db->execute(
+                    'UPDATE ai_credits SET credits_used = COALESCE(credits_used, 0) + ? WHERE id = ?',
+                    [$amount, $row['id']]
+                );
+                return;
+            }
+
+            $this->db->execute(
+                'INSERT INTO ai_credits (id, user_id, credits_limit, credits_used, reset_date, reset_month, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [generateUUID(), $userId, 0, $amount, date('Y-m-d', strtotime('+1 month')), date('Y-m'), date('Y-m-d H:i:s')]
+            );
+        } catch (\Throwable $e) {
+            error_log('AI credit usage record failed: ' . $e->getMessage());
+        }
     }
 
     private function storeChapterReview(string $researchId, string $userId, array &$review): void {
@@ -1644,29 +3789,50 @@ class FunctionController extends Controller {
         $review['user_id'] = $userId;
 
         try {
+            $availableColumns = array_flip(array_map(
+                static fn($column) => $column['Field'],
+                $this->db->getAll('SHOW COLUMNS FROM research_chapter_reviews')
+            ));
+
+            $values = [
+                'id' => $review['id'],
+                'research_id' => $researchId,
+                'user_id' => $userId,
+                'chapter_name' => (string)($review['chapter_name'] ?? 'Chapter'),
+                'chapter_number' => $review['chapter_number'] ?? null,
+                'rating' => (int)($review['rating'] ?? 3),
+                'academic_clarity_score' => (int)($review['academic_clarity_score'] ?? $review['rating'] ?? 3),
+                'methodology_alignment' => isset($review['methodology_alignment']) ? (int)$review['methodology_alignment'] : null,
+                'summary' => (string)($review['summary'] ?? ''),
+                'strengths' => json_encode($review['strengths'] ?? []),
+                'weak_areas' => json_encode($review['weak_areas'] ?? []),
+                'recommendations' => json_encode($review['recommendations'] ?? []),
+                'required_fixes' => json_encode($review['required_fixes'] ?? []),
+                'optional_improvements' => json_encode($review['optional_improvements'] ?? []),
+                'examiner_readiness' => (string)($review['examiner_readiness'] ?? 'needs_revision'),
+                'why_it_matters' => json_encode($review['why_it_matters'] ?? []),
+                'examiner_expectations' => json_encode($review['examiner_expectations'] ?? []),
+                'generic_examples' => json_encode($review['generic_examples'] ?? []),
+                'style_match_score' => isset($review['style_match_score']) ? (int)$review['style_match_score'] : null,
+                'ai_confidence_score' => (int)($review['ai_confidence_score'] ?? 75),
+                'ai_confidence_explanation' => isset($review['ai_confidence_explanation']) ? (string)$review['ai_confidence_explanation'] : null,
+                'review_mode' => (string)($review['review_mode'] ?? 'quick'),
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ];
+
+            $insertValues = array_intersect_key($values, $availableColumns);
+            $columns = array_keys($insertValues);
+            $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+            $quotedColumns = implode(', ', array_map(static fn($column) => "`{$column}`", $columns));
+
             $this->db->execute(
-                'INSERT INTO research_chapter_reviews (id, research_id, user_id, chapter_name, chapter_number, rating, summary, strengths, weak_areas, required_fixes, optional_improvements, ai_confidence_score, review_mode, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                [
-                    $review['id'],
-                    $researchId,
-                    $userId,
-                    $review['chapter_name'],
-                    $review['chapter_number'],
-                    (int)($review['rating'] ?? 3),
-                    (string)($review['summary'] ?? ''),
-                    json_encode($review['strengths'] ?? []),
-                    json_encode($review['weak_areas'] ?? []),
-                    json_encode($review['required_fixes'] ?? []),
-                    json_encode($review['optional_improvements'] ?? []),
-                    (int)($review['ai_confidence_score'] ?? 75),
-                    (string)($review['review_mode'] ?? 'quick'),
-                    date('Y-m-d H:i:s'),
-                    date('Y-m-d H:i:s'),
-                ]
+                "INSERT INTO research_chapter_reviews ({$quotedColumns}) VALUES ({$placeholders})",
+                array_values($insertValues)
             );
         } catch (\Throwable $e) {
             error_log('Chapter review store failed: ' . $e->getMessage());
         }
     }
 }
+

@@ -21,6 +21,30 @@ type SortKey =
 
 const PAGE_SIZE = 12;
 
+const toStringArray = (value: unknown): string[] | null => {
+  if (Array.isArray(value)) {
+    return value.map(String).filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed.map(String).filter(Boolean);
+      }
+    } catch {
+      // Fall through to comma-separated legacy data.
+    }
+
+    return trimmed.split(",").map((item) => item.trim()).filter(Boolean);
+  }
+
+  return null;
+};
+
 export default function ResearchPublic() {
   useSEO({
     title: "Research Discovery | R2PConnect",
@@ -80,15 +104,16 @@ export default function ResearchPublic() {
   // Load papers
   const fetchPapers = useCallback(async (resetPage = true) => {
     setLoading(true);
-    const currentPage = resetPage ? 0 : page;
+    try {
+      const currentPage = resetPage ? 0 : page;
 
-    let q = supabase
-      .from("research_papers")
-      .select(
-        "id,title,abstract,ai_summary,keywords,views_count,downloads_count,citation_count,published_at,year_completed,author_id,author_names,institution_id,supervisor_id,research_field,research_level,research_stage,funding_status,funding_required,file_url,download_credit_cost,sdg_category",
-        { count: "exact" }
-      )
-      .eq("status", "published");
+      let q = supabase
+        .from("research_papers")
+        .select(
+          "id,title,abstract,ai_summary,keywords,views_count,downloads_count,citation_count,published_at,year_completed,author_id,author_names,institution_id,supervisor_id,research_field,research_level,research_stage,funding_status,funding_required,file_url,download_credit_cost,sdg_category",
+          { count: "exact" }
+        )
+        .eq("status", "published");
 
     // Search
     if (debounced.trim()) {
@@ -142,14 +167,12 @@ export default function ResearchPublic() {
     const from = currentPage * PAGE_SIZE;
     q = q.range(from, from + PAGE_SIZE - 1);
 
-    const { data, error } = await q;
-    if (error) {
-      toast({ title: "Could not load research", description: error.message, variant: "destructive" });
-      setLoading(false);
-      return;
-    }
+      const { data, error } = await q;
+      if (error) {
+        throw error;
+      }
 
-    const rows = (data || []) as any[];
+      const rows = (data || []) as any[];
 
     // Resolve institution + supervisor + author names
     const instIds = Array.from(new Set(rows.map((r) => r.institution_id).filter(Boolean)));
@@ -162,26 +185,35 @@ export default function ResearchPublic() {
       profileIds.length ? supabase.from("public_profiles").select("user_id,full_name").in("user_id", profileIds) : Promise.resolve({ data: [] as any[] }),
     ]);
 
-    const instMap = new Map((instRes.data || []).map((i: any) => [i.id, i.name]));
-    const profMap = new Map((profRes.data || []).map((s: any) => [s.user_id, s.full_name]));
+      const instMap = new Map((instRes.data || []).map((i: any) => [i.id, i.name]));
+      const profMap = new Map((profRes.data || []).map((s: any) => [s.user_id, s.full_name]));
 
-    const enriched: PublicPaper[] = rows.map((r) => {
-      const hasNames = Array.isArray(r.author_names) && r.author_names.length > 0;
-      const fallback = profMap.get(r.author_id);
-      return {
-        ...r,
-        author_names: hasNames ? r.author_names : (fallback ? [fallback] : null),
-        institutionName: r.institution_id ? instMap.get(r.institution_id) : null,
-        supervisorName: r.supervisor_id ? profMap.get(r.supervisor_id) : null,
-      };
-    });
+      const enriched: PublicPaper[] = rows.map((r) => {
+        const authorNames = toStringArray(r.author_names);
+        const fallback = profMap.get(r.author_id);
+        return {
+          ...r,
+          author_names: authorNames?.length ? authorNames : (fallback ? [fallback] : null),
+          keywords: toStringArray(r.keywords),
+          institutionName: r.institution_id ? instMap.get(r.institution_id) : null,
+          supervisorName: r.supervisor_id ? profMap.get(r.supervisor_id) : null,
+        };
+      });
 
-    if (resetPage) setPapers(enriched);
-    else setPapers((prev) => [...prev, ...enriched]);
+      if (resetPage) setPapers(enriched);
+      else setPapers((prev) => [...prev, ...enriched]);
 
-    setHasMore(enriched.length === PAGE_SIZE);
-    if (resetPage) setPage(1); else setPage((p) => p + 1);
-    setLoading(false);
+      setHasMore(enriched.length === PAGE_SIZE);
+      if (resetPage) setPage(1); else setPage((p) => p + 1);
+    } catch (error: any) {
+      toast({ title: "Could not load research", description: error.message, variant: "destructive" });
+      if (resetPage) {
+        setPapers([]);
+        setHasMore(false);
+      }
+    } finally {
+      setLoading(false);
+    }
   }, [debounced, filters, sort, page, toast]);
 
   const hasActiveQuery = debounced.trim().length > 0;

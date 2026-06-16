@@ -30,6 +30,7 @@ import { handleEdgeFunctionResponse } from "@/lib/edgeFunctionError";
 import { Database } from "@/integrations/supabase/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { TermsCheckbox } from "@/components/TermsDialog";
+import PublicBrand from "@/components/layout/PublicBrand";
 
 type UserRole = Database["public"]["Enums"]["app_role"];
 
@@ -45,10 +46,15 @@ interface ValidatedInstitution {
   code_id: string;
 }
 
+type BeforeInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+};
+
 const roles = [
   {
     id: "researcher" as UserRole,
-    title: "Researcher / Student / Job",
+    title: "Student Research / Jobs",
     description: "Upload research, get AI insights, earn credits, apply for job",
     icon: User,
     color: "bg-blue-600",
@@ -99,6 +105,58 @@ const industryTypes = [
     color: "bg-orange-600",
   },
 ];
+
+const getWeakPasswordMessage = (password: string): string | null => {
+  if (password.length < 8) {
+    return "Password is too weak. Use at least 8 characters.";
+  }
+
+  if (!/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+    return "Password is too weak. Use at least one letter and one number.";
+  }
+
+  return null;
+};
+
+const getAuthErrorMessage = (error: any): string => {
+  const fallback = error?.message || "Something went wrong. Please try again.";
+  const data = error?.data;
+
+  if (data && typeof data === "object" && "errors" in data) {
+    const errors = (data as { errors?: Record<string, string[] | string> }).errors;
+    const passwordError = errors?.password;
+    if (Array.isArray(passwordError) && passwordError.length > 0) {
+      return passwordError[0];
+    }
+    if (typeof passwordError === "string") {
+      return passwordError;
+    }
+
+    const messages = Object.entries(errors || {})
+      .flatMap(([field, value]) => {
+        const label = field.replace(/_/g, " ");
+        if (Array.isArray(value)) {
+          return value.map((message) => String(message || "").trim()).filter(Boolean);
+        }
+        const message = String(value || "").trim();
+        return message ? [`${label}: ${message}`] : [];
+      });
+
+    if (messages.length > 0) {
+      return messages.join("\n");
+    }
+  }
+
+  if (data && typeof data === "object" && "message" in data && typeof (data as { message?: unknown }).message === "string") {
+    return (data as { message: string }).message;
+  }
+
+  if (/password.*at least|password.*min|weak password/i.test(fallback)) {
+    return "Password is too weak. Use at least 8 characters with one letter and one number.";
+  }
+
+  return fallback;
+};
 
 // Helper function to get dashboard URL based on role
 const getDashboardByRole = (role: UserRole): string => {
@@ -161,8 +219,8 @@ export default function Auth() {
     supervisor_name: string;
   } | null>(null);
 
-  // PWA Install state
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  // PWA install state
+  const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstallButton, setShowInstallButton] = useState(false);
 
   // Referral code from URL
@@ -291,37 +349,59 @@ export default function Auth() {
     fetchOnboardingData();
   }, [formData.institutionId]);
 
-  // PWA Install prompt listener
+  // PWA install prompt listener
   useEffect(() => {
+    const isStandalone = () =>
+      window.matchMedia("(display-mode: standalone)").matches ||
+      Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
+
+    const updateInstallVisibility = (prompt: BeforeInstallPromptEvent | null = deferredPrompt) => {
+      setShowInstallButton(Boolean(prompt) && !isStandalone());
+    };
+
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
-      setDeferredPrompt(e);
-      setShowInstallButton(true);
+      const promptEvent = e as BeforeInstallPromptEvent;
+      setDeferredPrompt(promptEvent);
+      updateInstallVisibility(promptEvent);
+    };
+
+    const handleAppInstalled = () => {
+      setDeferredPrompt(null);
+      setShowInstallButton(false);
+      toast({ title: "App installed", description: "R2P Connect has been added to your home screen." });
     };
     
+    updateInstallVisibility(null);
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
-    
-    // Check if already installed
-    if (window.matchMedia("(display-mode: standalone)").matches) {
-      setShowInstallButton(false);
-    }
+    window.addEventListener("appinstalled", handleAppInstalled);
+
+    const displayModeQuery = window.matchMedia("(display-mode: standalone)");
+    const handleDisplayModeChange = () => updateInstallVisibility();
+    displayModeQuery.addEventListener?.("change", handleDisplayModeChange);
     
     return () => {
       window.removeEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", handleAppInstalled);
+      displayModeQuery.removeEventListener?.("change", handleDisplayModeChange);
     };
-  }, []);
+  }, [deferredPrompt, toast]);
   
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return;
+    if (!deferredPrompt) {
+      setShowInstallButton(false);
+      return;
+    }
     
-    deferredPrompt.prompt();
+    await deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
     
     if (outcome === "accepted") {
       setShowInstallButton(false);
-      toast({ title: "App installed!", description: "R2P Connect has been added to your home screen." });
+      toast({ title: "Installing app", description: "R2P Connect is being added to your device." });
     }
     setDeferredPrompt(null);
+    setShowInstallButton(false);
   };
 
   // Check if user is already logged in and redirect
@@ -413,6 +493,16 @@ export default function Auth() {
     e.preventDefault();
     if (!selectedRole) {
       toast({ title: "Please select a role", variant: "destructive" });
+      return;
+    }
+
+    const weakPasswordMessage = getWeakPasswordMessage(formData.password);
+    if (weakPasswordMessage) {
+      toast({
+        title: "Weak password",
+        description: weakPasswordMessage,
+        variant: "destructive",
+      });
       return;
     }
 
@@ -514,6 +604,26 @@ export default function Auth() {
 
       if (error) throw error;
 
+      if (authData.user && selectedRole === "researcher") {
+        try {
+          await supabase.functions.invoke("ensure-free-ai-credits", {
+            body: { userId: authData.user.id },
+          });
+        } catch (creditError) {
+          console.error("Error initializing free AI credits:", creditError);
+        }
+      }
+
+      if (authData.user && selectedRole === "supervisor") {
+        try {
+          await supabase.functions.invoke("notify-supervisor-registration", {
+            body: { supervisor_user_id: authData.user.id },
+          });
+        } catch (notificationError) {
+          console.error("Error sending supervisor registration notification:", notificationError);
+        }
+      }
+
       // If institution registration, mark the code as used
       if (selectedRole === "institution" && validatedInstitution && authData.user) {
         try {
@@ -605,8 +715,8 @@ export default function Auth() {
       setValidatedInstitution(null);
     } catch (error: any) {
       toast({
-        title: "Error",
-        description: error.message,
+        title: /password/i.test(getAuthErrorMessage(error)) ? "Weak password" : "Error",
+        description: getAuthErrorMessage(error),
         variant: "destructive",
       });
     } finally {
@@ -698,20 +808,7 @@ export default function Auth() {
     <div className="min-h-screen bg-background flex">
       {/* Left Panel - Branding */}
       <div className="hidden lg:flex lg:w-1/2 gradient-hero flex-col justify-between p-12">
-        <Link to="/" className="flex items-center gap-2">
-          <div className="w-10 h-10 rounded-xl gradient-hero flex items-center justify-center shadow-lg overflow-hidden">
-            <img
-              src="/placeholder.svg"
-              alt="Logo"
-              className="w-full h-full object-cover"
-            />
-          </div>
-
-          <div>
-            <span className="font-bold text-xl text-white">R2P CONNECT</span>
-            <span className="block text-sm text-white/80">Research2Practice</span>
-          </div>
-        </Link>
+        <PublicBrand inverted />
 
         <div>
           <h1 className="text-4xl font-bold text-white mb-4">
@@ -759,6 +856,22 @@ export default function Auth() {
 
           <Card className="border-none shadow-xl rounded-2xl overflow-hidden">
             <CardHeader className="text-center pb-4">
+              {isSignUp && supervisorInviteData && (
+                <div className="mb-4 p-3 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/30 dark:to-purple-950/30 rounded-xl border border-indigo-200 dark:border-indigo-800">
+                  <div className="flex items-center justify-center gap-2 text-indigo-700 dark:text-indigo-300">
+                    <GraduationCap className="w-4 h-4" />
+                    <span className="text-sm font-medium">
+                      Invited by <strong>{supervisorInviteData.supervisor_name}</strong>
+                    </span>
+                  </div>
+                  {supervisorInviteData.department && (
+                    <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-1 text-center">
+                      Department: {supervisorInviteData.department}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Referral Banner */}
               {isSignUp && referrerName && (
                 <div className="mb-4 p-3 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 rounded-xl border border-amber-200 dark:border-amber-800">
@@ -794,6 +907,7 @@ export default function Auth() {
                             setShowIndustryTypeSelection(true);
                           } else {
                             setSelectedRole(role.id);
+                            setTermsAccepted(false);
                           }
                         }}
                         className="flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-border hover:border-primary transition-all text-left group bg-card hover:shadow-md"
@@ -847,6 +961,7 @@ export default function Auth() {
                         onClick={() => {
                           setSelectedRole(type.id);
                           setShowIndustryTypeSelection(false);
+                          setTermsAccepted(false);
                         }}
                         className="flex items-center gap-3 px-4 py-3 rounded-xl border-2 border-border hover:border-primary transition-all text-left group bg-card hover:shadow-md"
                       >
@@ -1226,6 +1341,7 @@ export default function Auth() {
                     setShowIndustryTypeSelection(false);
                     setValidatedInstitution(null);
                     setCodeError(null);
+                    setTermsAccepted(false);
                   }}
                   className="text-sm text-muted-foreground hover:text-primary transition-colors"
                 >

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { toNumber } from '@/lib/numberFormat';
 
 interface ExchangeRates {
   [key: string]: number;
@@ -8,8 +9,8 @@ interface ExchangeRates {
 interface CurrencyContextType {
   currency: string;
   setCurrency: (currency: string) => void;
-  convert: (amount: number, fromCurrency?: string) => number;
-  formatCurrency: (amount: number, fromCurrency?: string) => string;
+  convert: (amount: number | string | null | undefined, fromCurrency?: string) => number;
+  formatCurrency: (amount: number | string | null | undefined, fromCurrency?: string) => string;
   loading: boolean;
   rates: ExchangeRates;
   saveCurrencyPreference: (currency: string) => Promise<void>;
@@ -91,17 +92,18 @@ export function CurrencyProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const convert = (amount: number, fromCurrency: string = 'USD'): number => {
-    if (fromCurrency === currency) return amount;
+  const convert = (amount: number | string | null | undefined, fromCurrency: string = 'USD'): number => {
+    const numericAmount = toNumber(amount);
+    if (fromCurrency === currency) return numericAmount;
     
     // Convert to USD first, then to target currency
-    const amountInUSD = fromCurrency === 'USD' ? amount : amount / (rates[fromCurrency] || 1);
+    const amountInUSD = fromCurrency === 'USD' ? numericAmount : numericAmount / (rates[fromCurrency] || 1);
     const convertedAmount = amountInUSD * (rates[currency] || 1);
     
     return Math.round(convertedAmount * 100) / 100;
   };
 
-  const formatCurrency = (amount: number, fromCurrency: string = 'USD'): string => {
+  const formatCurrency = (amount: number | string | null | undefined, fromCurrency: string = 'USD'): string => {
     const converted = convert(amount, fromCurrency);
     const symbol = currencySymbols[currency] || currency;
     

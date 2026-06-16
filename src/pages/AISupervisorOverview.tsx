@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { useAICredits } from "@/hooks/useAICredits";
 import EthicsBanner from "@/components/ai-supervisor/EthicsBanner";
+import { formatRating, toNumber } from "@/lib/numberFormat";
 
 interface ResearchWithReviews {
   id: string;
@@ -68,7 +69,7 @@ export default function AISupervisorOverview() {
       const researchWithReviews: ResearchWithReviews[] = papers.map(paper => {
         const paperReviews = reviews?.filter(r => r.research_id === paper.id) || [];
         const avgRating = paperReviews.length > 0
-          ? paperReviews.reduce((sum, r) => sum + (r.rating || 0), 0) / paperReviews.length
+          ? paperReviews.reduce((sum, r) => sum + toNumber(r.rating), 0) / paperReviews.length
           : null;
         const supervisorReadyCount = paperReviews.filter(r => r.examiner_readiness === "supervisor_ready").length;
 
@@ -196,7 +197,7 @@ export default function AISupervisorOverview() {
                 <div>
                   <p className="text-sm text-muted-foreground">Average Rating</p>
                   <p className="text-2xl font-bold">
-                    {overallAvgRating ? overallAvgRating.toFixed(1) : "-"}/5
+                    {overallAvgRating ? formatRating(overallAvgRating) : "-"}/5
                   </p>
                 </div>
                 <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center">
@@ -259,7 +260,7 @@ export default function AISupervisorOverview() {
                               {research.avg_rating && (
                                 <span className="flex items-center gap-1">
                                   <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
-                                  {research.avg_rating.toFixed(1)}/5
+                                  {formatRating(research.avg_rating)}/5
                                 </span>
                               )}
                               {research.supervisor_ready_count > 0 && (

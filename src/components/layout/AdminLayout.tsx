@@ -5,7 +5,7 @@ import type { User, Session } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
-import { usePlatformSettings } from "@/hooks/usePlatformSettings";
+import AppLogo from "./AppLogo";
 import {
   Play,
   LayoutDashboard,
@@ -62,8 +62,6 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
-  const { platformLogo } = usePlatformSettings();
-
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
@@ -118,13 +116,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
         {/* Logo */}
         <div className="p-4 border-b border-slate-700">
           <Link to="/" className="flex items-center gap-2">
-            {platformLogo ? (
-              <img src={platformLogo} alt="Logo" className="w-10 h-10 rounded-2xl object-contain" />
-            ) : (
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center shadow-lg">
-                <Shield className="w-5 h-5 text-white" />
-              </div>
-            )}
+            <AppLogo className="w-10 h-10 rounded-2xl" />
             <div>
               <span className="font-bold text-lg text-white">R2P CONNECT</span>
               <span className="block text-xs text-red-400">Admin Panel</span>

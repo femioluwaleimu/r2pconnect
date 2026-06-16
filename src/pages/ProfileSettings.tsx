@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { useCurrency } from "@/context/CurrencyContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import ReferralCard from "@/components/ReferralCard";
+import { prepareAvatarImage } from "@/lib/avatarImage";
 
 interface Profile {
   full_name: string;
@@ -49,6 +50,11 @@ interface Institution {
   name: string;
 }
 
+interface Department {
+  id: string;
+  name: string;
+}
+
 const toStringArray = (value: unknown): string[] => {
   if (Array.isArray(value)) {
     return value.map(String).filter(Boolean);
@@ -78,6 +84,7 @@ export default function ProfileSettings() {
   const [loading, setLoading] = useState(false);
   const [fetchingProfile, setFetchingProfile] = useState(true);
   const [institutions, setInstitutions] = useState<Institution[]>([]);
+  const [activeDepartments, setActiveDepartments] = useState<Department[]>([]);
   const [skillInput, setSkillInput] = useState("");
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false);
   const [passwordLoading, setPasswordLoading] = useState(false);
@@ -183,6 +190,44 @@ export default function ProfileSettings() {
     fetchUserAndProfile();
   }, [toast]);
 
+  useEffect(() => {
+    const fetchDepartments = async () => {
+      if (!profile.institution_id) {
+        setActiveDepartments([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("departments")
+        .select("id, name")
+        .eq("institution_id", profile.institution_id)
+        .eq("is_active", true)
+        .order("name");
+
+      if (error) {
+        toast({
+          title: "Unable to load departments",
+          description: error.message || "Please refresh and try again.",
+          variant: "destructive",
+        });
+        setActiveDepartments([]);
+        return;
+      }
+
+      const departments = data || [];
+      setActiveDepartments(departments);
+      if (departments.length) {
+        setProfile((prev) =>
+          prev.department && !departments.some((dept) => dept.name === prev.department)
+            ? { ...prev, department: "" }
+            : prev
+        );
+      }
+    };
+
+    fetchDepartments();
+  }, [profile.institution_id, toast]);
+
   const handleUpdateProfile = async () => {
     if (!user) return;
     setLoading(true);
@@ -235,20 +280,14 @@ export default function ProfileSettings() {
     const file = e.target.files?.[0];
     if (!file || !user) return;
 
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast({ title: "File too large", description: "Maximum file size is 5MB", variant: "destructive" });
-      return;
-    }
-
     setLoading(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const filePath = `${user.id}/avatar.${fileExt}`;
+      const avatarFile = await prepareAvatarImage(file);
+      const filePath = `${user.id}/avatar.jpg`;
 
       const { error: uploadError } = await supabase.storage
         .from('avatars')
-        .upload(filePath, file, { upsert: true });
+        .upload(filePath, avatarFile, { upsert: true });
 
       if (uploadError) throw uploadError;
 
@@ -256,12 +295,13 @@ export default function ProfileSettings() {
         .from('avatars')
         .getPublicUrl(filePath);
 
-      setProfile(prev => ({ ...prev, avatar_url: publicUrl }));
+      const avatarUrl = `${publicUrl}?t=${Date.now()}`;
+      setProfile(prev => ({ ...prev, avatar_url: avatarUrl }));
       
       // Update profile in database
       await supabase
         .from('profiles')
-        .update({ avatar_url: publicUrl })
+        .update({ avatar_url: avatarUrl })
         .eq('user_id', user.id);
       
       toast({ title: "Avatar uploaded successfully" });
@@ -273,7 +313,7 @@ export default function ProfileSettings() {
   };
 
   const handleChangePassword = async () => {
-    if (!passwordForm.new || !passwordForm.confirm) {
+    if (!passwordForm.current || !passwordForm.new || !passwordForm.confirm) {
       toast({ title: "Please fill in all fields", variant: "destructive" });
       return;
     }
@@ -281,8 +321,8 @@ export default function ProfileSettings() {
       toast({ title: "Passwords don't match", variant: "destructive" });
       return;
     }
-    if (passwordForm.new.length < 6) {
-      toast({ title: "Password must be at least 6 characters", variant: "destructive" });
+    if (passwordForm.new.length < 8) {
+      toast({ title: "Password must be at least 8 characters", variant: "destructive" });
       return;
     }
 
@@ -290,6 +330,7 @@ export default function ProfileSettings() {
     try {
       // Use Supabase auth updateUser for password change
       const { error } = await supabase.auth.updateUser({
+        currentPassword: passwordForm.current,
         password: passwordForm.new
       });
 
@@ -322,6 +363,35 @@ export default function ProfileSettings() {
     const inst = institutions.find(i => i.id === profile.institution_id);
     return inst?.name || "Unknown institution";
   };
+
+  const renderDepartmentField = () => (
+    <div>
+      <Label htmlFor="department">Department</Label>
+      {profile.institution_id && activeDepartments.length > 0 ? (
+        <Select
+          value={profile.department || ""}
+          onValueChange={(value) => setProfile(prev => ({ ...prev, department: value }))}
+        >
+          <SelectTrigger id="department" className="rounded-xl mt-1">
+            <SelectValue placeholder="Select your department" />
+          </SelectTrigger>
+          <SelectContent>
+            {activeDepartments.map((dept) => (
+              <SelectItem key={dept.id} value={dept.name}>{dept.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <Input
+          id="department"
+          value={profile.department || ""}
+          onChange={(e) => setProfile(prev => ({ ...prev, department: e.target.value }))}
+          placeholder="e.g. Computer Science"
+          className="rounded-xl mt-1"
+        />
+      )}
+    </div>
+  );
 
   if (fetchingProfile) {
     return (
@@ -478,31 +548,13 @@ export default function ProfileSettings() {
                     </Select>
                   </div>
                 </div>
-                <div>
-                  <Label htmlFor="department">Department</Label>
-                  <Input
-                    id="department"
-                    value={profile.department || ""}
-                    onChange={(e) => setProfile(prev => ({ ...prev, department: e.target.value }))}
-                    placeholder="e.g. Computer Science"
-                    className="rounded-xl mt-1"
-                  />
-                </div>
+                {renderDepartmentField()}
               </>
             )}
 
             {profile.researcher_type === 'lecturer' && (
               <>
-                <div>
-                  <Label htmlFor="department">Department</Label>
-                  <Input
-                    id="department"
-                    value={profile.department || ""}
-                    onChange={(e) => setProfile(prev => ({ ...prev, department: e.target.value }))}
-                    placeholder="e.g. Computer Science"
-                    className="rounded-xl mt-1"
-                  />
-                </div>
+                {renderDepartmentField()}
                 <div>
                   <Label>Fields of Interest</Label>
                   <Textarea
@@ -559,16 +611,7 @@ export default function ProfileSettings() {
                     </Select>
                   </div>
                 </div>
-                <div>
-                  <Label htmlFor="department">Department</Label>
-                  <Input
-                    id="department"
-                    value={profile.department || ""}
-                    onChange={(e) => setProfile(prev => ({ ...prev, department: e.target.value }))}
-                    placeholder="e.g. Computer Science"
-                    className="rounded-xl mt-1"
-                  />
-                </div>
+                {renderDepartmentField()}
               </>
             )}
           </CardContent>
@@ -830,7 +873,7 @@ export default function ProfileSettings() {
                     className="hidden"
                     onChange={handleAvatarUpload}
                   />
-                  <p className="text-xs text-muted-foreground">JPG, PNG up to 5MB</p>
+                  <p className="text-xs text-muted-foreground">Auto-cropped square, compressed to 50KB</p>
                 </div>
               </div>
             </CardContent>
@@ -1004,10 +1047,21 @@ export default function ProfileSettings() {
               Change Password
             </DialogTitle>
             <DialogDescription>
-              Enter your new password below.
+              Enter your current password and choose a new one.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="currentPassword">Current Password</Label>
+              <Input
+                id="currentPassword"
+                type="password"
+                placeholder="Enter current password"
+                value={passwordForm.current}
+                onChange={(e) => setPasswordForm(prev => ({ ...prev, current: e.target.value }))}
+                className="rounded-xl"
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="newPassword">New Password</Label>
               <Input

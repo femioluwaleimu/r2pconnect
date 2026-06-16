@@ -37,11 +37,45 @@ class StorageController extends Controller {
         ]);
     }
 
+    public function publicFile(string $bucket, string $encodedPath): void {
+        $decodedPath = $this->decodePublicPath($encodedPath);
+        if ($decodedPath === '') {
+            Response::error('File path is required', 422);
+            return;
+        }
+
+        $relativePath = $this->cleanPath($bucket . '/' . $decodedPath);
+        $targetPath = BASE_PATH . '/storage/uploads/' . $relativePath;
+        $storageRoot = realpath(BASE_PATH . '/storage/uploads');
+        $filePath = realpath($targetPath);
+
+        if (!$storageRoot || !$filePath || strpos($filePath, $storageRoot) !== 0 || !is_file($filePath)) {
+            Response::error('File not found', 404);
+            return;
+        }
+
+        $mimeType = 'application/octet-stream';
+        if (function_exists('finfo_open')) {
+            $finfo = finfo_open(FILEINFO_MIME_TYPE);
+            if ($finfo) {
+                $detected = finfo_file($finfo, $filePath);
+                if (is_string($detected) && $detected !== '') {
+                    $mimeType = $detected;
+                }
+                finfo_close($finfo);
+            }
+        }
+
+        header('Content-Type: ' . $mimeType);
+        header('Content-Length: ' . filesize($filePath));
+        header('Cache-Control: public, max-age=31536000, immutable');
+        readfile($filePath);
+    }
+
     public function publicUrl(string $bucket, string $path = ''): string {
         $apiUrl = rtrim(env('API_URL', ''), '/');
-        $baseUrl = $apiUrl ? preg_replace('#/api\.php$#', '', $apiUrl) : '';
-        $relativePath = $this->cleanPath($bucket . '/' . $path);
-        return rtrim($baseUrl, '/') . '/storage/uploads/' . $relativePath;
+        $baseUrl = $apiUrl ?: '/api.php';
+        return rtrim($baseUrl, '/') . '?/storage/' . rawurlencode($bucket) . '/public/' . $this->encodePublicPath($path);
     }
 
     private function cleanPath(string $path): string {
@@ -54,5 +88,20 @@ class StorageController extends Controller {
             $parts[] = preg_replace('/[^A-Za-z0-9._-]/', '_', $part);
         }
         return implode('/', $parts);
+    }
+
+    private function encodePublicPath(string $path): string {
+        return rtrim(strtr(base64_encode($path), '+/', '-_'), '=');
+    }
+
+    private function decodePublicPath(string $path): string {
+        $padded = strtr($path, '-_', '+/');
+        $padding = strlen($padded) % 4;
+        if ($padding) {
+            $padded .= str_repeat('=', 4 - $padding);
+        }
+
+        $decoded = base64_decode($padded, true);
+        return is_string($decoded) ? $decoded : '';
     }
 }

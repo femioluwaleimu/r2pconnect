@@ -1,0 +1,8 @@
+ALTER TABLE supervisor_student_messages
+  MODIFY COLUMN id CHAR(36) NOT NULL,
+  MODIFY COLUMN is_read BOOLEAN DEFAULT FALSE,
+  MODIFY COLUMN created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP;
+
+UPDATE supervisor_student_messages
+SET created_at = CURRENT_TIMESTAMP
+WHERE created_at IS NULL;

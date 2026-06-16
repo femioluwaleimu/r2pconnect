@@ -11,6 +11,7 @@ import { Trophy, Search, Filter, Info, Plus, CheckCircle, Clock, Edit, Trash2, D
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { formatLagos } from "@/lib/dateUtils";
+import { formatAmount, toNumber } from "@/lib/numberFormat";
 
 interface Challenge {
   id: string;
@@ -52,7 +53,10 @@ export default function AdminChallenges() {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      setChallenges(data || []);
+      setChallenges((data || []).map((challenge) => ({
+        ...challenge,
+        reward_amount: challenge.reward_amount == null ? null : toNumber(challenge.reward_amount),
+      })));
     } catch (error) {
       console.error('Error fetching challenges:', error);
     } finally {
@@ -366,7 +370,7 @@ export default function AdminChallenges() {
                           {challenge.reward_amount && (
                             <span className="flex items-center gap-1 text-emerald-600 font-medium">
                               <DollarSign className="w-4 h-4" />
-                              {challenge.reward_currency === 'NGN' ? '₦' : '$'}{challenge.reward_amount.toLocaleString()}
+                              {challenge.reward_currency === 'NGN' ? '₦' : '$'}{formatAmount(challenge.reward_amount)}
                             </span>
                           )}
                           {challenge.deadline && (

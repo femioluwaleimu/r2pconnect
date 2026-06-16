@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAICredits } from "@/hooks/useAICredits";
+import { formatAmount, formatPercent, toNumber } from "@/lib/numberFormat";
 
 interface ResearchPaper {
   id: string;
@@ -118,7 +119,10 @@ export default function PersonalizedFeed() {
       .select('*')
       .eq('is_active', true)
       .limit(5);
-    setChallenges(data || []);
+    setChallenges((data || []).map((challenge) => ({
+      ...challenge,
+      reward_amount: challenge.reward_amount == null ? null : toNumber(challenge.reward_amount),
+    })));
   };
 
   const fetchOpportunities = async () => {
@@ -127,7 +131,10 @@ export default function PersonalizedFeed() {
       .select('*')
       .eq('is_active', true)
       .limit(5);
-    setOpportunities(data || []);
+    setOpportunities((data || []).map((job) => ({
+      ...job,
+      payment_amount: job.payment_amount == null ? null : toNumber(job.payment_amount),
+    })));
   };
 
   const fetchRecommendations = async (interests: string[], userId?: string) => {
@@ -293,7 +300,7 @@ export default function PersonalizedFeed() {
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-xs text-muted-foreground">AI Recommended #{index + 1}</span>
                           <Badge className="bg-green-500 text-white text-xs px-2 py-0.5 rounded-full">
-                            {paper.matchScore?.toFixed(0) || 95}% Match
+                            {formatPercent(paper.matchScore || 95)}% Match
                           </Badge>
                         </div>
                         
@@ -370,7 +377,7 @@ export default function PersonalizedFeed() {
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                         {challenge.reward_amount && (
                           <Badge className="bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 self-start">
-                            {challenge.reward_currency} {challenge.reward_amount.toLocaleString()}
+                            {challenge.reward_currency} {formatAmount(challenge.reward_amount)}
                           </Badge>
                         )}
                         <Link to={`/dashboard/challenges/${challenge.id}`}>

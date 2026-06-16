@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { BarChart3, Building2, Briefcase, Users, Wallet, TrendingUp, FileCheck } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { formatLagos } from "@/lib/dateUtils";
+import { formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 interface AnalyticsData {
   totalCompanies: number;
@@ -65,8 +66,12 @@ export default function IPNAnalytics() {
       publishedOpportunities: opps.filter(o => o.is_published).length,
       totalApplications: apps.length,
       statusBreakdown,
-      totalRevenue: walletRes.data?.total_earned || 0,
-      recentPayments: paymentsRes.data || [],
+      totalRevenue: toNumber(walletRes.data?.total_earned),
+      recentPayments: (paymentsRes.data || []).map((payment) => ({
+        ...payment,
+        amount_ngn: toNumber(payment.amount_ngn),
+        ipn_share_ngn: toNumber(payment.ipn_share_ngn),
+      })),
       topOpportunities,
     });
     setLoading(false);
@@ -88,7 +93,7 @@ export default function IPNAnalytics() {
     { icon: Building2, label: "Total Companies", value: data.totalCompanies, sub: `${data.activeCompanies} active`, color: "text-blue-500" },
     { icon: Briefcase, label: "Opportunities", value: data.totalOpportunities, sub: `${data.publishedOpportunities} published`, color: "text-green-500" },
     { icon: Users, label: "Applications", value: data.totalApplications, sub: `${data.statusBreakdown.pending} pending`, color: "text-orange-500" },
-    { icon: Wallet, label: "Total Revenue", value: `₦${data.totalRevenue.toLocaleString()}`, sub: "All time", color: "text-primary" },
+    { icon: Wallet, label: "Total Revenue", value: formatCurrencyAmount(data.totalRevenue), sub: "All time", color: "text-primary" },
   ];
 
   return (
@@ -200,8 +205,8 @@ export default function IPNAnalytics() {
                         <td className="py-2.5 text-foreground truncate max-w-[200px]">
                           {(p.ipn_opportunities as any)?.title || "—"}
                         </td>
-                        <td className="py-2.5 text-right text-foreground">₦{p.amount_ngn?.toLocaleString()}</td>
-                        <td className="py-2.5 text-right font-medium text-green-600">₦{p.ipn_share_ngn?.toLocaleString()}</td>
+                        <td className="py-2.5 text-right text-foreground">{formatCurrencyAmount(p.amount_ngn)}</td>
+                        <td className="py-2.5 text-right font-medium text-green-600">{formatCurrencyAmount(p.ipn_share_ngn)}</td>
                         <td className="py-2.5 text-right text-muted-foreground">{formatLagos(p.created_at)}</td>
                       </tr>
                     ))}

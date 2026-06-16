@@ -1,1 +1,0 @@
-CREATE POLICY "Anyone can read download credit rate" ON public.platform_settings FOR SELECT TO public USING (key = 'download_credit_rate_ngn');

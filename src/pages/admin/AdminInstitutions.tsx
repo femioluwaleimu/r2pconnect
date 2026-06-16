@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import AdminLayout from "@/components/layout/AdminLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,10 +7,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Building2, Search, Filter, Info, Plus, CheckCircle, Clock, Copy, Trash2, Key, Edit, GraduationCap, Users, Loader2 } from "lucide-react";
+import { Building2, Search, Filter, Info, Plus, CheckCircle, Clock, Copy, Trash2, Key, Edit, GraduationCap, Users, Loader2, Wand2, Eye } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
@@ -54,6 +56,27 @@ const ONBOARDING_TYPES = [
   { value: "pilot_program", label: "Pilot Program" },
 ];
 
+const createUuid = () => {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return cryptoApi.randomUUID();
+  }
+
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const rand = Math.floor(Math.random() * 16);
+    const value = char === "x" ? rand : (rand & 0x3) | 0x8;
+    return value.toString(16);
+  });
+};
+
 export default function AdminInstitutions() {
   const [institutions, setInstitutions] = useState<Institution[]>([]);
   const [verificationCodes, setVerificationCodes] = useState<VerificationCode[]>([]);
@@ -68,6 +91,12 @@ export default function AdminInstitutions() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loadingDepts, setLoadingDepts] = useState(false);
   const [newDeptName, setNewDeptName] = useState("");
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupDepartments, setLookupDepartments] = useState<string[]>([]);
+  const [selectedLookupDepartments, setSelectedLookupDepartments] = useState<string[]>([]);
+  const [lookupSource, setLookupSource] = useState("");
+  const [lookupQuery, setLookupQuery] = useState("");
+  const [importingDepartments, setImportingDepartments] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     description: "",
@@ -118,6 +147,7 @@ export default function AdminInstitutions() {
       
       // First insert institution
       const { data: instData, error: instError } = await supabase.from('institutions').insert({
+        id: createUuid(),
         name: formData.name,
         description: formData.description || null,
         website: formData.website || null,
@@ -129,6 +159,7 @@ export default function AdminInstitutions() {
 
       // Then insert verification code in separate table
       const { error: codeError } = await supabase.from('institution_verification_codes').insert({
+        id: createUuid(),
         institution_id: instData.id,
         verification_code: verificationCode,
       });
@@ -222,7 +253,7 @@ export default function AdminInstitutions() {
         // Insert new code
         const { error } = await supabase
           .from('institution_verification_codes')
-          .insert({ institution_id: institutionId, verification_code: newCode });
+          .insert({ id: createUuid(), institution_id: institutionId, verification_code: newCode });
         if (error) throw error;
       }
 
@@ -253,6 +284,10 @@ export default function AdminInstitutions() {
   const openDeptDialog = async (inst: Institution) => {
     setDeptInstitution(inst);
     setDeptDialogOpen(true);
+    setLookupDepartments([]);
+    setSelectedLookupDepartments([]);
+    setLookupSource("");
+    setLookupQuery("");
     setLoadingDepts(true);
     const { data } = await supabase
       .from("departments")
@@ -266,6 +301,7 @@ export default function AdminInstitutions() {
   const addDepartment = async () => {
     if (!newDeptName.trim() || !deptInstitution) return;
     const { error } = await supabase.from("departments").insert({
+      id: createUuid(),
       name: newDeptName.trim(),
       institution_id: deptInstitution.id,
     });
@@ -287,6 +323,90 @@ export default function AdminInstitutions() {
     if (!deptInstitution) return;
     await supabase.from("departments").delete().eq("id", deptId);
     openDeptDialog(deptInstitution);
+  };
+
+  const fetchDepartmentsOnline = async () => {
+    if (!deptInstitution) return;
+    setLookupLoading(true);
+    setLookupDepartments([]);
+    setSelectedLookupDepartments([]);
+    setLookupSource("");
+    setLookupQuery(`${deptInstitution.name} list of departments`);
+
+    try {
+      const { data, error } = await supabase.functions.invoke("department-lookup", {
+        body: {
+          school_name: deptInstitution.name,
+          website: deptInstitution.website,
+        },
+      });
+
+      if (error) throw error;
+      if (data?.error) throw new Error(data.error);
+
+      const current = new Set(departments.map((dept) => dept.name.trim().toLowerCase()));
+      const suggestions = Array.from(new Set(((data?.departments || []) as string[])
+        .map((name) => name.trim())
+        .filter(Boolean)))
+        .sort((a, b) => a.localeCompare(b));
+
+      setLookupDepartments(suggestions);
+      setSelectedLookupDepartments(suggestions.filter((name) => !current.has(name.toLowerCase())));
+      setLookupSource(data?.source || "online");
+      setLookupQuery(data?.search_query || `${deptInstitution.name} list of departments`);
+
+      if (suggestions.length === 0) {
+        toast({ title: "No departments found", description: "Try adding departments manually." });
+      }
+    } catch (error: any) {
+      toast({ title: "Department lookup failed", description: error.message, variant: "destructive" });
+    } finally {
+      setLookupLoading(false);
+    }
+  };
+
+  const toggleLookupDepartment = (name: string) => {
+    setSelectedLookupDepartments((prev) =>
+      prev.includes(name) ? prev.filter((item) => item !== name) : [...prev, name]
+    );
+  };
+
+  const importSelectedDepartments = async () => {
+    if (!deptInstitution || selectedLookupDepartments.length === 0) return;
+    setImportingDepartments(true);
+
+    try {
+      const current = new Set(departments.map((dept) => dept.name.trim().toLowerCase()));
+      const rows = selectedLookupDepartments
+        .map((name) => name.trim())
+        .filter((name) => name && !current.has(name.toLowerCase()))
+        .map((name) => ({
+          id: createUuid(),
+          institution_id: deptInstitution.id,
+          name,
+          is_active: true,
+          onboarding_status: "imported",
+        }));
+
+      if (rows.length === 0) {
+        toast({ title: "No new departments", description: "Selected departments already exist." });
+        return;
+      }
+
+      const { error } = await supabase.from("departments").insert(rows);
+      if (error) throw error;
+
+      toast({ title: "Departments imported", description: `${rows.length} department${rows.length === 1 ? "" : "s"} added.` });
+      setLookupDepartments([]);
+      setSelectedLookupDepartments([]);
+      setLookupSource("");
+      setLookupQuery("");
+      openDeptDialog(deptInstitution);
+    } catch (error: any) {
+      toast({ title: "Import failed", description: error.message, variant: "destructive" });
+    } finally {
+      setImportingDepartments(false);
+    }
   };
 
   const filteredInstitutions = institutions.filter(inst =>
@@ -540,6 +660,17 @@ export default function AdminInstitutions() {
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
                         <Button
+                          asChild
+                          variant="outline"
+                          size="sm"
+                          className="rounded-xl"
+                        >
+                          <Link to={`/institution?institution_id=${inst.id}`}>
+                            <Eye className="w-4 h-4 mr-1" />
+                            Impersonate
+                          </Link>
+                        </Button>
+                        <Button
                           variant="outline"
                           size="sm"
                           onClick={() => openDeptDialog(inst)}
@@ -612,6 +743,101 @@ export default function AdminInstitutions() {
                 Add
               </Button>
             </div>
+
+            <div className="rounded-xl border border-dashed border-border p-3 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Online Department Lookup</p>
+                  <p className="text-xs text-muted-foreground">
+                    Searches "{deptInstitution?.name || "Institution name"} list of departments", then lets you choose which ones to add.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={fetchDepartmentsOnline}
+                  disabled={lookupLoading || !deptInstitution}
+                  className="rounded-xl"
+                >
+                  {lookupLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
+                  Fetch Online
+                </Button>
+              </div>
+
+              {lookupDepartments.length > 0 && (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary" className="rounded-full">
+                        {lookupDepartments.length} found
+                      </Badge>
+                      {lookupSource && (
+                        <span className="text-xs text-muted-foreground">Source: {lookupSource}</span>
+                      )}
+                    </div>
+                    {lookupQuery && (
+                      <p className="w-full text-xs text-muted-foreground">
+                        Query: {lookupQuery}
+                      </p>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelectedLookupDepartments(lookupDepartments.filter((name) => !departments.some((dept) => dept.name.toLowerCase() === name.toLowerCase())))}
+                        className="h-8 rounded-lg"
+                      >
+                        Select new
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelectedLookupDepartments([])}
+                        className="h-8 rounded-lg"
+                      >
+                        Clear
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="max-h-56 overflow-y-auto rounded-xl border bg-background">
+                    {lookupDepartments.map((name) => {
+                      const exists = departments.some((dept) => dept.name.trim().toLowerCase() === name.trim().toLowerCase());
+                      const checked = selectedLookupDepartments.includes(name);
+                      return (
+                        <label
+                          key={name}
+                          className={`flex items-center justify-between gap-3 p-3 border-b last:border-b-0 ${exists ? "opacity-60" : "cursor-pointer hover:bg-muted/50"}`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <Checkbox
+                              checked={checked}
+                              disabled={exists}
+                              onCheckedChange={() => toggleLookupDepartment(name)}
+                            />
+                            <span className="text-sm font-medium text-foreground">{name}</span>
+                          </div>
+                          {exists && <Badge variant="outline" className="rounded-full">Existing</Badge>}
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  <Button
+                    type="button"
+                    onClick={importSelectedDepartments}
+                    disabled={importingDepartments || selectedLookupDepartments.length === 0}
+                    className="w-full rounded-xl"
+                  >
+                    {importingDepartments ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plus className="w-4 h-4 mr-2" />}
+                    Add Selected ({selectedLookupDepartments.length})
+                  </Button>
+                </div>
+              )}
+            </div>
+
             {loadingDepts ? (
               <div className="flex justify-center py-4">
                 <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />

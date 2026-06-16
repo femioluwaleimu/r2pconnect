@@ -43,6 +43,7 @@ import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useNavigate } from "react-router-dom";
 import { formatLagos } from "@/lib/dateUtils";
+import { formatAmount, formatPercent, toNumber } from "@/lib/numberFormat";
 
 interface ChallengeMatch {
   id: string;
@@ -296,6 +297,7 @@ export default function IndustryChallenges() {
           ]);
           return {
             ...challenge,
+            reward_amount: challenge.reward_amount == null ? null : toNumber(challenge.reward_amount),
             submissions_count: submissionsResult.count || 0,
             matchesCount: matchesResult.count || 0,
           };
@@ -443,7 +445,15 @@ export default function IndustryChallenges() {
       }
 
       setChallenges((prev) =>
-        prev.map((c) => (c.id === challengeId ? { ...c, matches: data.matches, matchesLoading: false, matchesCount: data.total_matches } : c)),
+        prev.map((c) => (c.id === challengeId ? {
+          ...c,
+          matches: (data.matches || []).map((match: ChallengeMatch) => ({
+            ...match,
+            relevance_score: toNumber(match.relevance_score),
+          })),
+          matchesLoading: false,
+          matchesCount: data.total_matches,
+        } : c)),
       );
       setExpandedChallenges((prev) => new Set([...prev, challengeId]));
       toast({ title: "AI Matching Complete", description: `Found ${data.new_matches} new researcher matches!` });
@@ -679,7 +689,7 @@ export default function IndustryChallenges() {
                       {challenge.reward_amount && (
                         <span className="flex items-center gap-1 text-emerald-600 font-medium">
                           <Banknote className="w-3.5 h-3.5" />
-                          {challenge.reward_currency === "NGN" ? "₦" : "$"}{challenge.reward_amount.toLocaleString()}
+                          {challenge.reward_currency === "NGN" ? "₦" : "$"}{formatAmount(challenge.reward_amount)}
                         </span>
                       )}
                       {challenge.deadline && (
@@ -732,7 +742,7 @@ export default function IndustryChallenges() {
                                     <div className="flex items-center gap-1 flex-wrap">
                                       <span className="font-medium text-foreground text-xs">{match.researcher?.full_name || "Unknown"}</span>
                                       <Badge variant="secondary" className={`text-[10px] ${match.relevance_score >= 80 ? "bg-emerald-100 text-emerald-700" : match.relevance_score >= 60 ? "bg-amber-100 text-amber-700" : "bg-gray-100 text-gray-700"}`}>
-                                        {match.relevance_score}%
+                                        {formatPercent(match.relevance_score)}%
                                       </Badge>
                                     </div>
                                     <p className="text-[10px] text-muted-foreground line-clamp-1">{match.paper?.title}</p>

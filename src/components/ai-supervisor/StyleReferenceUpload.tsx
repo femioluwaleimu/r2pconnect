@@ -35,6 +35,32 @@ interface StyleReferenceUploadProps {
 
 const MAX_REFERENCES = 5;
 
+const isDatabaseQueryError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String((error as any)?.message || error || "");
+  return message.includes("Database query failed") || message.includes("Database query error");
+};
+
+const createUuid = () => {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return cryptoApi.randomUUID();
+  }
+
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const rand = Math.floor(Math.random() * 16);
+    const value = char === "x" ? rand : (rand & 0x3) | 0x8;
+    return value.toString(16);
+  });
+};
+
 export default function StyleReferenceUpload({
   onStyleSourceChange,
   hasInstitutionStyle = false,
@@ -43,6 +69,7 @@ export default function StyleReferenceUpload({
   const [references, setReferences] = useState<StyleReference[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [available, setAvailable] = useState(true);
   const [declarationAccepted, setDeclarationAccepted] = useState(false);
   const [newFile, setNewFile] = useState<File | null>(null);
   const [sourceDescription, setSourceDescription] = useState("");
@@ -63,7 +90,15 @@ export default function StyleReferenceUpload({
         .eq("user_id", user.id)
         .order("created_at", { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        if (isDatabaseQueryError(error)) {
+          console.warn("Student style references are not available in this database yet.");
+          setAvailable(false);
+          setReferences([]);
+          return;
+        }
+        throw error;
+      }
       setReferences((data as StyleReference[]) || []);
     } catch (error: any) {
       console.error("Error fetching references:", error);
@@ -126,6 +161,7 @@ export default function StyleReferenceUpload({
       const { error } = await supabase
         .from("student_style_references")
         .insert({
+          id: createUuid(),
           user_id: user.id,
           file_name: newFile.name,
           file_size: newFile.size,
@@ -133,7 +169,13 @@ export default function StyleReferenceUpload({
           declaration_accepted: true,
         });
 
-      if (error) throw error;
+      if (error) {
+        if (isDatabaseQueryError(error)) {
+          setAvailable(false);
+          throw new Error("Style references are not available yet.");
+        }
+        throw error;
+      }
 
       toast({
         title: "Reference added",
@@ -174,6 +216,10 @@ export default function StyleReferenceUpload({
       });
     }
   };
+
+  if (!available) {
+    return null;
+  }
 
   return (
     <Card className="border-border/50">

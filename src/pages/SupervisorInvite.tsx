@@ -162,35 +162,12 @@ export default function SupervisorInvite() {
           })
           .eq("id", invite.id);
 
-        // Send notification email to institution admin
-        const { data: institutionData } = await supabase
-          .from("institutions")
-          .select("admin_user_id, name")
-          .eq("id", invite.institution_id)
-          .maybeSingle();
-
-        if (institutionData?.admin_user_id) {
-          const { data: adminProfile } = await supabase
-            .from("profiles")
-            .select("email, full_name")
-            .eq("user_id", institutionData.admin_user_id)
-            .maybeSingle();
-
-          if (adminProfile?.email) {
-            await supabase.functions.invoke("send-email", {
-              body: {
-                type: "supervisor_registered",
-                to: adminProfile.email,
-                data: {
-                  adminName: adminProfile.full_name,
-                  supervisorName: invite.full_name,
-                  supervisorEmail: invite.email,
-                  department: invite.department,
-                  institutionName: institutionData.name
-                }
-              }
-            });
-          }
+        try {
+          await supabase.functions.invoke("notify-supervisor-registration", {
+            body: { supervisor_user_id: authData.user.id },
+          });
+        } catch (notificationError) {
+          console.error("Error sending supervisor registration notification:", notificationError);
         }
 
         setSuccess(true);

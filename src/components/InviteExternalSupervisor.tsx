@@ -19,6 +19,32 @@ interface InviteExternalSupervisorProps {
   onInviteSent?: () => void;
 }
 
+const isDatabaseQueryError = (error: unknown) => {
+  const message = error instanceof Error ? error.message : String((error as any)?.message || error || "");
+  return message.includes("Database query failed") || message.includes("Database query error");
+};
+
+const createUuid = () => {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return cryptoApi.randomUUID();
+  }
+
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const rand = Math.floor(Math.random() * 16);
+    const value = char === "x" ? rand : (rand & 0x3) | 0x8;
+    return value.toString(16);
+  });
+};
+
 export default function InviteExternalSupervisor({ onInviteSent }: InviteExternalSupervisorProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -53,19 +79,29 @@ export default function InviteExternalSupervisor({ onInviteSent }: InviteExterna
       if (!user) throw new Error("Not authenticated");
 
       const inviteCode = generateInviteCode();
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + 30);
       
       const { error } = await supabase
         .from("external_supervisor_invites")
         .insert({
+          id: createUuid(),
           student_id: user.id,
           email: formData.email.toLowerCase(),
           full_name: formData.fullName,
           department: formData.department || null,
           institution_name: formData.institutionName || null,
           invite_code: inviteCode,
+          status: "pending",
+          expires_at: expiresAt.toISOString(),
         });
 
-      if (error) throw error;
+      if (error) {
+        if (isDatabaseQueryError(error)) {
+          throw new Error("External supervisor invites are not available yet. Please contact the administrator.");
+        }
+        throw error;
+      }
 
       const link = `${window.location.origin}/external-supervisor-invite?code=${inviteCode}`;
       setInviteLink(link);

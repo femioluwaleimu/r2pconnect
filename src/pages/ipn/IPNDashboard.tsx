@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Building2, Briefcase, Users, Wallet, Plus, ArrowRight } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Link } from "react-router-dom";
+import { formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 export default function IPNDashboard() {
   const [stats, setStats] = useState({ companies: 0, opportunities: 0, applicants: 0, revenue: 0 });
@@ -26,7 +27,7 @@ export default function IPNDashboard() {
         companies: companiesRes.count || 0,
         opportunities: oppsRes.count || 0,
         applicants: appsRes.count || 0,
-        revenue: walletRes.data?.total_earned || 0,
+        revenue: toNumber(walletRes.data?.total_earned),
       });
       setLoading(false);
     };
@@ -37,7 +38,7 @@ export default function IPNDashboard() {
     { label: "Companies", value: stats.companies, icon: Building2, color: "from-blue-500 to-indigo-600", href: "/ipn/companies" },
     { label: "Opportunities", value: stats.opportunities, icon: Briefcase, color: "from-emerald-500 to-teal-600", href: "/ipn/opportunities" },
     { label: "Applicants", value: stats.applicants, icon: Users, color: "from-purple-500 to-violet-600", href: "/ipn/applicants" },
-    { label: "Total Revenue", value: `₦${stats.revenue.toLocaleString()}`, icon: Wallet, color: "from-amber-500 to-orange-600", href: "/ipn/revenue" },
+    { label: "Total Revenue", value: formatCurrencyAmount(stats.revenue), icon: Wallet, color: "from-amber-500 to-orange-600", href: "/ipn/revenue" },
   ];
 
   return (

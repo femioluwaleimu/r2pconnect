@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/table";
 import { Plus, Pencil, Trash2, Loader2, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 interface TopupPackage {
   id: string;
@@ -50,7 +51,10 @@ export default function CreditTopupPackages() {
       .select('*')
       .order('sort_order');
     if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
-    else setPackages(data || []);
+    else setPackages((data || []).map((pkg) => ({
+      ...pkg,
+      amount_ngn: toNumber(pkg.amount_ngn),
+    })));
     setLoading(false);
   };
 
@@ -136,7 +140,7 @@ export default function CreditTopupPackages() {
                   </div>
                 </TableCell>
                 <TableCell>{pkg.credits} credits</TableCell>
-                <TableCell>₦{pkg.amount_ngn?.toLocaleString()}</TableCell>
+                <TableCell>{formatCurrencyAmount(pkg.amount_ngn)}</TableCell>
                 <TableCell>
                   <Badge variant={pkg.is_active ? "default" : "secondary"}>
                     {pkg.is_active ? "Active" : "Inactive"}

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import type { User } from "@/integrations/supabase/client";
@@ -8,7 +8,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { handleEdgeFunctionResponse } from "@/lib/edgeFunctionError";
+import { AI_CREDIT_EXHAUSTED_MESSAGE, friendlyErrorMessage } from "@/lib/errorMessage";
 import CreditTopupDialog from "@/components/CreditTopupDialog";
+import SavedAIResponses from "@/components/ai/SavedAIResponses";
 import {
   Sparkles,
   FileText,
@@ -86,6 +88,8 @@ export default function AIAssistant() {
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const inputCardRef = useRef<HTMLDivElement | null>(null);
+  const textAreaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -106,6 +110,14 @@ export default function AIAssistant() {
       .maybeSingle();
 
     if (subscription) {
+      let creditsRemaining = subscription.ai_credits_remaining || 0;
+      if (subscription.tier === 'free' && creditsRemaining < 3) {
+        const { data: repaired } = await supabase.functions.invoke("ensure-free-ai-credits", {
+          body: { userId },
+        });
+        creditsRemaining = repaired?.credits_remaining ?? creditsRemaining;
+      }
+
       const tierToPlanId = subscription.tier === 'free' ? 'researcher_free' : `researcher_${subscription.tier}`;
       const { data: planData } = await supabase
         .from("subscription_plans")
@@ -131,15 +143,19 @@ export default function AIAssistant() {
       const topupCredits = (topups || []).reduce((sum, t) => sum + Number(t.credits || 0), 0);
 
       const creditLimit = Number(planData?.ai_credits_per_day || 2) + topupCredits;
-      const creditsUsed = creditLimit - (subscription.ai_credits_remaining || 0);
+      const creditsUsed = creditLimit - creditsRemaining;
       
       setAiCredits({ used: Math.max(0, creditsUsed), limit: creditLimit });
     }
   };
 
   const handleSelectTool = (toolId: string) => {
-    // Single selection - toggle off if same, else select new
-    setSelectedTool((prev) => (prev === toolId ? null : toolId));
+    setSelectedTool(toolId);
+
+    window.setTimeout(() => {
+      inputCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      textAreaRef.current?.focus({ preventScroll: true });
+    }, 80);
   };
 
   const handleAnalyze = async () => {
@@ -150,8 +166,8 @@ export default function AIAssistant() {
 
     if (aiCredits.used >= aiCredits.limit) {
       toast({
-        title: "Monthly credits exhausted",
-        description: "Top up your credits or upgrade your plan for more AI access",
+        title: "No AI Credits",
+        description: AI_CREDIT_EXHAUSTED_MESSAGE,
         variant: "destructive",
       });
       return;
@@ -172,7 +188,7 @@ export default function AIAssistant() {
       }
 
       if (result?.error) {
-        toast({ title: "AI Error", description: result.error, variant: "destructive" });
+        toast({ title: "AI Error", description: friendlyErrorMessage(result.error), variant: "destructive" });
         return;
       }
 
@@ -185,7 +201,7 @@ export default function AIAssistant() {
         description: `Credits remaining: ${result.credits_remaining}`,
       });
     } catch (error: any) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+      toast({ title: "Error", description: friendlyErrorMessage(error.message), variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -298,7 +314,7 @@ export default function AIAssistant() {
 
         {/* Input Area */}
         {selectedTool && (
-          <Card className="border-0 shadow-tick animate-fade-in rounded-xl">
+          <Card ref={inputCardRef} className="border-0 shadow-tick animate-fade-in rounded-xl scroll-mt-24">
             <CardHeader className="border-b border-border/50">
               <div className="flex items-center gap-3">
                 {selectedToolData && (
@@ -316,6 +332,7 @@ export default function AIAssistant() {
             </CardHeader>
             <CardContent className="space-y-4 pt-6">
               <Textarea
+                ref={textAreaRef}
                 placeholder="Paste your research content, draft, or topic here..."
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -390,6 +407,23 @@ export default function AIAssistant() {
             </CardContent>
           </Card>
         )}
+
+        <SavedAIResponses
+          toolType="ai_assistant"
+          toolLabel="AI Research Assistant"
+          currentTitle={selectedToolData?.title || "AI Assistant response"}
+          currentPrompt={input}
+          currentResponse={result}
+          currentMetadata={{ source: "dashboard/ai-assistant", selectedTool }}
+          onRestore={(item) => {
+            const restoredTool = typeof item.metadata?.selectedTool === "string" ? item.metadata.selectedTool : null;
+            if (restoredTool) {
+              setSelectedTool(restoredTool);
+            }
+            setInput(item.prompt || "");
+            setResult(item.response);
+          }}
+        />
 
         {/* Empty State when no result */}
         {selectedTool && !result && !loading && (

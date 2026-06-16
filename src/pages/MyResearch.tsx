@@ -63,6 +63,32 @@ const PURPOSE_LABELS: Record<string, string> = {
   personal_development: "Personal Development",
 };
 
+const sortPapersLatestFirst = (items: ResearchPaper[]) =>
+  [...items].sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+
+const normalizePapers = (value: unknown): ResearchPaper[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter((paper): paper is Record<string, any> => Boolean(paper) && typeof paper === "object")
+    .map((paper) => ({
+      id: String(paper.id || ""),
+      title: String(paper.title || "Untitled research"),
+      abstract: paper.abstract == null ? null : String(paper.abstract),
+      status: String(paper.status || "draft"),
+      views_count: Number(paper.views_count || 0),
+      downloads_count: Number(paper.downloads_count || 0),
+      created_at: String(paper.created_at || new Date(0).toISOString()),
+      file_name: paper.file_name == null ? null : String(paper.file_name),
+      research_type: paper.research_type == null ? null : String(paper.research_type),
+      supervisor_approval_status: paper.supervisor_approval_status == null ? null : String(paper.supervisor_approval_status),
+      supervision_type: paper.supervision_type == null ? null : String(paper.supervision_type),
+      research_level: paper.research_level == null ? null : String(paper.research_level),
+      research_purpose: paper.research_purpose == null ? null : String(paper.research_purpose),
+    }))
+    .filter((paper) => paper.id);
+};
+
 const statusConfig: Record<string, { label: string; color: string; icon: any; gradient: string }> = {
   draft: { label: "Draft", color: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300", icon: FileText, gradient: "from-slate-500 to-slate-600" },
   under_review: { label: "Under Review", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400", icon: Clock, gradient: "from-amber-500 to-orange-500" },
@@ -80,6 +106,7 @@ export default function MyResearch() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -95,30 +122,47 @@ export default function MyResearch() {
   }, [navigate]);
 
   useEffect(() => {
+    const latestFirst = sortPapersLatestFirst(papers);
+
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
-      setFilteredPapers(papers.filter(p => 
+      setFilteredPapers(latestFirst.filter(p => 
         p.title.toLowerCase().includes(query) ||
         p.abstract?.toLowerCase().includes(query)
       ));
     } else {
-      setFilteredPapers(papers);
+      setFilteredPapers(latestFirst);
     }
   }, [searchQuery, papers]);
 
   const fetchPapers = async (userId: string) => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('research_papers')
-      .select('*')
-      .eq('author_id', userId)
-      .order('created_at', { ascending: false });
-    
-    if (data) {
-      setPapers(data);
-      setFilteredPapers(data);
+    setFetchError(null);
+    try {
+      const { data, error } = await supabase
+        .from('research_papers')
+        .select('*')
+        .eq('author_id', userId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw error;
+      }
+
+      if (data) {
+        const latestFirst = sortPapersLatestFirst(normalizePapers(data));
+        setPapers(latestFirst);
+        setFilteredPapers(latestFirst);
+      }
+    } catch (error: any) {
+      const message = error?.message || 'Failed to load research papers';
+      setFetchError(message);
+      toast({ title: 'Error', description: message, variant: 'destructive' });
+      setPapers([]);
+      setFilteredPapers([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleDelete = async () => {
@@ -247,6 +291,17 @@ export default function MyResearch() {
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
             <p className="mt-4 text-muted-foreground">Loading your research...</p>
           </div>
+        ) : fetchError ? (
+          <Card className="p-12 text-center rounded-2xl border-dashed border-2 bg-muted/20">
+            <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-red-500/20 to-red-600/20 flex items-center justify-center">
+              <XCircle className="w-10 h-10 text-red-500/80" />
+            </div>
+            <h3 className="text-xl font-semibold text-foreground mb-2">Unable to load research</h3>
+            <p className="text-muted-foreground mb-6">{fetchError}</p>
+            <Button onClick={() => user && fetchPapers(user.id)} className="rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white">
+              Retry
+            </Button>
+          </Card>
         ) : filteredPapers.length === 0 ? (
           <Card className="p-12 text-center rounded-2xl border-dashed border-2 bg-muted/20">
             <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">

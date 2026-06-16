@@ -14,6 +14,7 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } f
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid } from "recharts";
 import { format, subWeeks, subMonths, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachWeekOfInterval, eachMonthOfInterval } from "date-fns";
 import { formatLagos } from "@/lib/dateUtils";
+import { formatCompactCurrency, formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 import { toast } from "@/hooks/use-toast";
 
 type FilterMode = "daily" | "weekly" | "monthly" | "custom";
@@ -111,9 +112,9 @@ export default function AdminRevenue() {
         supabase.from("admin_expenses").select("id, title, description, amount, category, expense_date, created_at").gte("expense_date", from.toISOString()).lte("expense_date", to.toISOString()).order("expense_date", { ascending: false }),
       ]);
 
-      const pays = (payRes.data || []) as RevenueRow[];
-      const tops = (topupRes.data || []) as TopupRow[];
-      const exps = (expRes.data || []) as ExpenseRow[];
+      const pays = ((payRes.data || []) as RevenueRow[]).map((row) => ({ ...row, amount: toNumber(row.amount) }));
+      const tops = ((topupRes.data || []) as TopupRow[]).map((row) => ({ ...row, amount: toNumber(row.amount), credits: toNumber(row.credits) }));
+      const exps = ((expRes.data || []) as ExpenseRow[]).map((row) => ({ ...row, amount: toNumber(row.amount) }));
       setPayments(pays);
       setTopups(tops);
       setExpenses(exps);
@@ -259,7 +260,7 @@ export default function AdminRevenue() {
                     <span className="text-sm font-medium text-foreground/70">Total Revenue</span>
                     <Banknote className="w-5 h-5 text-primary" />
                   </div>
-                  <p className="text-2xl font-bold text-foreground">{loading ? "..." : `₦${totalRevenue.toLocaleString()}`}</p>
+                  <p className="text-2xl font-bold text-foreground">{loading ? "..." : formatCurrencyAmount(totalRevenue)}</p>
                   <p className="text-xs text-muted-foreground">{payments.length + topups.length} transactions</p>
                 </CardContent>
               </Card>
@@ -269,7 +270,7 @@ export default function AdminRevenue() {
                     <span className="text-sm font-medium text-foreground/70">Subscriptions</span>
                     <CreditCard className="w-5 h-5 text-blue-500" />
                   </div>
-                  <p className="text-2xl font-bold text-foreground">{loading ? "..." : `₦${totalSubscriptionRevenue.toLocaleString()}`}</p>
+                  <p className="text-2xl font-bold text-foreground">{loading ? "..." : formatCurrencyAmount(totalSubscriptionRevenue)}</p>
                   <p className="text-xs text-muted-foreground">{payments.length} payments</p>
                 </CardContent>
               </Card>
@@ -282,7 +283,7 @@ export default function AdminRevenue() {
                   <span className="text-sm font-medium text-foreground/70">Total Expenses</span>
                   <MinusCircle className="w-5 h-5 text-destructive" />
                 </div>
-                <p className="text-2xl font-bold text-foreground">{loading ? "..." : `₦${totalExpenses.toLocaleString()}`}</p>
+                <p className="text-2xl font-bold text-foreground">{loading ? "..." : formatCurrencyAmount(totalExpenses)}</p>
                 <p className="text-xs text-muted-foreground">{expenses.length} entries</p>
               </CardContent>
             </Card>
@@ -295,7 +296,7 @@ export default function AdminRevenue() {
                   {profitLoss >= 0 ? <TrendingUp className="w-5 h-5 text-emerald-500" /> : <TrendingDown className="w-5 h-5 text-destructive" />}
                 </div>
                 <p className={`text-2xl font-bold ${profitLoss >= 0 ? "text-emerald-600" : "text-destructive"}`}>
-                  {loading ? "..." : `${profitLoss < 0 ? "-" : ""}₦${Math.abs(profitLoss).toLocaleString()}`}
+                  {loading ? "..." : `${profitLoss < 0 ? "-" : ""}${formatCurrencyAmount(Math.abs(profitLoss))}`}
                 </p>
                 <p className="text-xs text-muted-foreground">{profitLoss >= 0 ? "Net profit" : "Net loss"} this period</p>
               </CardContent>
@@ -314,7 +315,7 @@ export default function AdminRevenue() {
                 <BarChart data={chartData}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border/30" />
                   <XAxis dataKey="label" className="text-xs" />
-                  <YAxis className="text-xs" tickFormatter={(v) => `₦${(v / 1000).toFixed(0)}k`} />
+                  <YAxis className="text-xs" tickFormatter={(v) => formatCompactCurrency(v)} />
                   <ChartTooltip content={<ChartTooltipContent />} />
                   {showRevenue && <Bar dataKey="subscriptions" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} stackId="revenue" />}
                   {showRevenue && <Bar dataKey="topups" fill="hsl(142 76% 36%)" radius={[4, 4, 0, 0]} stackId="revenue" />}
@@ -356,7 +357,7 @@ export default function AdminRevenue() {
                         </td>
                         <td className="py-2.5 px-3 text-foreground">{tx.details}</td>
                         <td className={`py-2.5 px-3 font-semibold ${tx.isExpense ? "text-destructive" : "text-foreground"}`}>
-                          {tx.isExpense ? "-" : ""}₦{tx.amount.toLocaleString()}
+                          {tx.isExpense ? "-" : ""}{formatCurrencyAmount(tx.amount)}
                         </td>
                         <td className="py-2.5 px-3 text-muted-foreground text-xs">{formatLagos(tx.date)}</td>
                       </tr>

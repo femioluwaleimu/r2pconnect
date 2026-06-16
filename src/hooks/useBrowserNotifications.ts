@@ -34,8 +34,8 @@ export function useBrowserNotifications() {
 
       try {
         const notification = new Notification(title, {
-          icon: "/favicon.ico",
-          badge: "/favicon.ico",
+          icon: "/app-logo-192.png",
+          badge: "/app-logo-192.png",
           ...options,
         });
 

@@ -30,6 +30,27 @@ const FUNDING_STATUSES = [
   { value: "funded", label: "Funded" }
 ];
 
+const createUuid = () => {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return cryptoApi.randomUUID();
+  }
+
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const rand = Math.floor(Math.random() * 16);
+    const value = char === "x" ? rand : (rand & 0x3) | 0x8;
+    return value.toString(16);
+  });
+};
+
 export default function CompletedResearchUpload() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(false);
@@ -53,6 +74,7 @@ export default function CompletedResearchUpload() {
     practicalApplications: [] as string[],
     yearCompleted: new Date().getFullYear(),
     allowDownload: true,
+    downloadCreditCost: 0,
     isPublishedJournal: false,
     journalName: "",
     journalUrl: "",
@@ -209,6 +231,7 @@ export default function CompletedResearchUpload() {
       const { error } = await supabase
         .from('research_papers')
         .insert({
+          id: createUuid(),
           title: formData.title,
           abstract: formData.abstract,
           ai_summary: formData.aiSummary || null,
@@ -230,6 +253,7 @@ export default function CompletedResearchUpload() {
           supervisor_id: null,
           supervisor_approval_status: null,
           allow_download: formData.allowDownload,
+          download_credit_cost: formData.allowDownload ? Math.max(0, formData.downloadCreditCost) : 0,
           is_published_journal: formData.isPublishedJournal,
           journal_name: formData.isPublishedJournal ? formData.journalName || null : null,
           journal_url: formData.isPublishedJournal ? formData.journalUrl || null : null,
@@ -692,6 +716,20 @@ export default function CompletedResearchUpload() {
                   onCheckedChange={(checked) => setFormData({ ...formData, allowDownload: checked })}
                 />
               </div>
+              {formData.allowDownload && (
+                <div className="pt-3 border-t">
+                  <Label className="text-sm font-medium">Download Cost (credits)</Label>
+                  <p className="text-xs text-muted-foreground mb-2">Set how many credits others need to download this completed research.</p>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={formData.downloadCreditCost}
+                    onChange={(e) => setFormData({ ...formData, downloadCreditCost: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                    className="mt-1.5 rounded-xl"
+                  />
+                </div>
+              )}
             </CardContent>
           </Card>
 

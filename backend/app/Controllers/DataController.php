@@ -6,6 +6,8 @@ use App\Core\Controller;
 use App\Core\Response;
 
 class DataController extends Controller {
+    private const RESEARCHER_FREE_MONTHLY_CREDITS = 3;
+
     public function query(): void {
         try {
             $table = $this->identifier($this->input('table', ''));
@@ -15,6 +17,10 @@ class DataController extends Controller {
             }
 
             $filters = $this->input('filters', []);
+            if ($table === 'subscriptions') {
+                $this->renewResearcherFreeCreditsIfDue();
+            }
+
             $select = $this->buildSelect((string)$this->input('select', '*'));
             $where = $this->buildWhere(is_array($filters) ? $filters : []);
             $order = $this->buildOrder($this->input('order', []));
@@ -52,6 +58,56 @@ class DataController extends Controller {
         } catch (\Throwable $e) {
             error_log('Data query error: ' . $e->getMessage());
             Response::error('Database query failed', 500);
+        }
+    }
+
+    private function renewResearcherFreeCreditsIfDue(): void {
+        try {
+            $now = date('Y-m-d H:i:s');
+            $end = date('Y-m-d H:i:s', strtotime('+1 month'));
+            $this->db->execute(
+                "INSERT INTO subscriptions (id, user_id, tier, amount, currency, current_period_start, current_period_end, ai_credits_remaining, ai_matchers_remaining, max_challenges_per_month, ai_matches_per_challenge, is_active, created_at, updated_at)
+                 SELECT UUID(), ur.user_id, 'free', 0, 'NGN', ?, ?, ?, 0, 0, 0, 1, ?, ?
+                 FROM user_roles ur
+                 LEFT JOIN subscriptions s ON s.user_id = ur.user_id
+                 LEFT JOIN ai_credits ac ON ac.user_id = ur.user_id
+                 WHERE ur.role = 'researcher'
+                   AND s.id IS NULL
+                   AND COALESCE(ac.credits_used, 0) = 0",
+                [$now, $end, self::RESEARCHER_FREE_MONTHLY_CREDITS, $now, $now]
+            );
+
+            $this->db->execute(
+                "UPDATE subscriptions s
+                 INNER JOIN user_roles ur ON ur.user_id = s.user_id
+                 SET s.current_period_start = ?,
+                     s.current_period_end = ?,
+                     s.ai_credits_remaining = ?,
+                     s.is_active = 1,
+                     s.updated_at = ?
+                 WHERE s.tier = 'free'
+                   AND ur.role = 'researcher'
+                   AND (s.current_period_end IS NULL OR s.current_period_end < ?)",
+                [$now, $end, self::RESEARCHER_FREE_MONTHLY_CREDITS, $now, $now]
+            );
+
+            $this->db->execute(
+                "UPDATE subscriptions s
+                 INNER JOIN user_roles ur ON ur.user_id = s.user_id
+                 LEFT JOIN ai_credits ac ON ac.user_id = s.user_id
+                 SET s.current_period_start = COALESCE(s.current_period_start, ?),
+                     s.current_period_end = COALESCE(s.current_period_end, ?),
+                     s.ai_credits_remaining = ?,
+                     s.is_active = 1,
+                     s.updated_at = ?
+                 WHERE s.tier = 'free'
+                   AND ur.role = 'researcher'
+                   AND COALESCE(s.ai_credits_remaining, 0) < ?
+                   AND COALESCE(ac.credits_used, 0) = 0",
+                [$now, $end, self::RESEARCHER_FREE_MONTHLY_CREDITS, $now, self::RESEARCHER_FREE_MONTHLY_CREDITS]
+            );
+        } catch (\Throwable $e) {
+            error_log('Free subscription renewal failed: ' . $e->getMessage());
         }
     }
 

@@ -8,6 +8,7 @@ import { Target, Sparkles, TrendingUp, Loader2, Copy, Download, Check } from "lu
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useAICredits } from "@/hooks/useAICredits";
+import SavedAIResponses from "@/components/ai/SavedAIResponses";
 
 export default function GapDetector() {
   const [field, setField] = useState("");
@@ -207,6 +208,19 @@ export default function GapDetector() {
             </CardContent>
           </Card>
         </div>
+
+        <SavedAIResponses
+          toolType="gap_detector"
+          toolLabel="Gap Detector"
+          currentTitle={field.trim() ? `Gap analysis: ${field.trim().slice(0, 80)}` : "Gap analysis"}
+          currentPrompt={field}
+          currentResponse={result}
+          currentMetadata={{ source: "dashboard/gap-detector" }}
+          onRestore={(item) => {
+            setField(item.prompt || "");
+            setResult(item.response);
+          }}
+        />
       </div>
     </DashboardLayout>
   );

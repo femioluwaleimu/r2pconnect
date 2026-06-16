@@ -39,6 +39,47 @@ const roleTerms: Record<string, { title: string; sections: { heading: string; co
       }
     ]
   },
+  supervisor: {
+    title: "Terms and Conditions of Supervisor Registration",
+    sections: [
+      {
+        heading: "1. Eligibility and Accurate Information",
+        content: "By registering as a supervisor, you confirm that your name, email address, phone number, institution, department, academic rank, staff ID, and other submitted details are accurate and belong to you. R2P Connect may verify this information before approving or activating your supervisor account."
+      },
+      {
+        heading: "2. Institution and Department Association",
+        content: "You agree to register under the correct institution and department. Your institution may review, approve, suspend, or remove your supervisor access where required by its internal policies or by platform rules."
+      },
+      {
+        heading: "3. Academic Supervision Responsibilities",
+        content: "You agree to provide fair, timely, and constructive academic guidance to assigned students. You are responsible for reviewing submissions professionally, requesting revisions where needed, and approving only work that meets acceptable academic, ethical, and institutional standards."
+      },
+      {
+        heading: "4. Ethical Review and Academic Integrity",
+        content: "You must not approve plagiarized, fabricated, misleading, or unethical research. You agree to encourage proper citation, originality, responsible AI use, data integrity, and compliance with applicable research ethics requirements."
+      },
+      {
+        heading: "5. AI Review Tools",
+        content: "AI review tools on R2P Connect are provided to support supervision and are advisory only. You retain responsibility for your academic decisions and should independently assess AI-generated suggestions before relying on them."
+      },
+      {
+        heading: "6. Student Data and Confidentiality",
+        content: "You agree to protect student information, research drafts, feedback, messages, and institutional data. You must not disclose student work or personal data outside approved academic, institutional, or platform workflows."
+      },
+      {
+        heading: "7. Conduct and Communication",
+        content: "You agree to communicate respectfully with students, institutions, reviewers, and platform administrators. Harassment, exploitation, abusive conduct, fraudulent approval, or misuse of supervisor privileges may lead to account restriction or removal."
+      },
+      {
+        heading: "8. Payments, Credits, and Revenue",
+        content: "Where supervisor-related payments, credits, commissions, or withdrawals apply, they are subject to platform rules, verification, transaction history, and applicable institutional arrangements. R2P Connect may review transactions for fraud prevention and compliance."
+      },
+      {
+        heading: "9. Account Review and Suspension",
+        content: "R2P Connect and authorized institution administrators may review supervisor activity. Your account may be suspended, limited, or removed if your information is false, your conduct violates these terms, or your supervision activity creates academic or operational risk."
+      }
+    ]
+  },
   institution: {
     title: "Terms of Use for Institutions",
     sections: [
@@ -206,6 +247,7 @@ interface TermsCheckboxProps {
 
 export function TermsCheckbox({ checked, onCheckedChange, role }: TermsCheckboxProps) {
   const [termsOpen, setTermsOpen] = useState(false);
+  const terms = role ? roleTerms[role] || roleTerms.researcher : roleTerms.researcher;
 
   return (
     <>
@@ -223,7 +265,7 @@ export function TermsCheckbox({ checked, onCheckedChange, role }: TermsCheckboxP
             onClick={() => setTermsOpen(true)}
             className="text-primary hover:underline"
           >
-            Terms and Conditions
+            {terms.title}
           </button>
         </Label>
       </div>

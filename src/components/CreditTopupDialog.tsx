@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { handleEdgeFunctionResponse } from "@/lib/edgeFunctionError";
+import { formatCurrencyAmount } from "@/lib/numberFormat";
 import { Zap, Loader2, Sparkles } from "lucide-react";
 
 interface TopupPackage {
@@ -154,7 +155,7 @@ export default function CreditTopupDialog({ onSuccess, trigger }: CreditTopupDia
                     {purchasing === pkg.id ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
-                      `₦${pkg.amount_ngn?.toLocaleString()}`
+                      formatCurrencyAmount(pkg.amount_ngn)
                     )}
                   </Button>
                 </CardContent>

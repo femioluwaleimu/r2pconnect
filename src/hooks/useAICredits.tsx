@@ -35,6 +35,14 @@ export function useAICredits() {
       
       if (data) {
         const tier = data.tier || 'free';
+        let creditsRemaining = data.ai_credits_remaining ?? 0;
+
+        if (tier === 'free' && creditsRemaining < 3) {
+          const { data: repaired } = await supabase.functions.invoke("ensure-free-ai-credits", {
+            body: { userId: user.id },
+          });
+          creditsRemaining = repaired?.credits_remaining ?? creditsRemaining;
+        }
         
         // Fetch the actual credit limit from subscription_plans based on tier
         const planId = `researcher_${tier}`;
@@ -73,7 +81,7 @@ export function useAICredits() {
           });
         } else {
           setAiCredits({
-            credits_remaining: data.ai_credits_remaining ?? 0,
+            credits_remaining: creditsRemaining,
             credits_limit: creditsLimit,
             period_end: data.current_period_end || '',
             tier,

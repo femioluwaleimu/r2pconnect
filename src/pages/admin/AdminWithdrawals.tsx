@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Loader2, CheckCircle, XCircle, Building2, GraduationCap, Wallet, Clock, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatLagos } from "@/lib/dateUtils";
+import AdminLayout from '@/components/layout/AdminLayout';
 
 interface StudentWithdrawal {
   id: string;
@@ -252,13 +253,16 @@ export default function AdminWithdrawals() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
+      <AdminLayout>
+        <div className="flex items-center justify-center min-h-[400px]">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </AdminLayout>
     );
   }
 
   return (
+    <AdminLayout>
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-foreground">Withdrawal Management</h1>
@@ -556,5 +560,6 @@ export default function AdminWithdrawals() {
         </DialogContent>
       </Dialog>
     </div>
+    </AdminLayout>
   );
 }

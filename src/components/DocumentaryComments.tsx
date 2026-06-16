@@ -5,8 +5,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { MessageCircle, Send, Loader2, Trash2 } from "lucide-react";
+import { MessageCircle, Send, Loader2, Trash2, Clock } from "lucide-react";
 import type { User } from "@/integrations/supabase/client";
+import { formatLagos } from "@/lib/dateUtils";
 
 interface Comment {
   id: string;
@@ -92,6 +93,7 @@ export function DocumentaryComments({ documentaryId }: DocumentaryCommentsProps)
         documentary_id: documentaryId,
         user_id: user.id,
         content: newComment.trim(),
+        created_at: new Date().toISOString(),
       })
       .select()
       .single();
@@ -143,8 +145,11 @@ export function DocumentaryComments({ documentaryId }: DocumentaryCommentsProps)
     toast({ title: "Comment deleted" });
   };
 
-  const formatDate = (dateStr: string) => {
+  const formatRelativeDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return "";
     const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return "";
+
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const minutes = Math.floor(diff / 60000);
@@ -155,7 +160,14 @@ export function DocumentaryComments({ documentaryId }: DocumentaryCommentsProps)
     if (minutes < 60) return `${minutes}m ago`;
     if (hours < 24) return `${hours}h ago`;
     if (days < 7) return `${days}d ago`;
-    return date.toLocaleDateString();
+    return formatLagos(dateStr, "dd MMM yyyy, HH:mm");
+  };
+
+  const formatFullDate = (dateStr: string | null | undefined) => {
+    if (!dateStr) return "Date unavailable";
+    const date = new Date(dateStr);
+    if (Number.isNaN(date.getTime())) return "Date unavailable";
+    return formatLagos(dateStr, "dd MMM yyyy, HH:mm");
   };
 
   return (
@@ -219,8 +231,12 @@ export function DocumentaryComments({ documentaryId }: DocumentaryCommentsProps)
                       <span className="font-medium text-sm text-foreground">
                         {comment.commenter?.full_name || "Anonymous"}
                       </span>
-                      <span className="text-xs text-muted-foreground">
-                        {formatDate(comment.created_at)}
+                      <span
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground"
+                        title={formatFullDate(comment.created_at)}
+                      >
+                        <Clock className="w-3 h-3" />
+                        {formatRelativeDate(comment.created_at) || formatFullDate(comment.created_at)}
                       </span>
                     </div>
                     {user?.id === comment.user_id && (

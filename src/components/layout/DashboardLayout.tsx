@@ -6,7 +6,7 @@ import type { User, Session } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
-import { usePlatformSettings } from "@/hooks/usePlatformSettings";
+import AppLogo from "./AppLogo";
 import { formatLagos } from "@/lib/dateUtils";
 
 import {
@@ -85,6 +85,44 @@ const sidebarItems: SidebarItem[] = [
 { icon: Bell, label: "Supervisor Inbox", href: "/dashboard/supervisor-inbox" },
 { icon: UserIcon, label: "Profile", href: "/dashboard/profile" }];
 
+const toStringList = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+
+  if (typeof value !== "string") return [];
+
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => String(item).trim()).filter(Boolean);
+    }
+  } catch {
+    // Some rows store keywords as comma-separated text.
+  }
+
+  return trimmed.split(",").map((item) => item.trim()).filter(Boolean);
+};
+
+const normalizeNotifications = (value: unknown): Notification[] => {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .filter((item): item is Record<string, any> => Boolean(item) && typeof item === "object")
+    .map((item) => ({
+      id: String(item.id || ""),
+      title: String(item.title || "Notification"),
+      message: item.message == null ? null : String(item.message),
+      is_read: Boolean(item.is_read),
+      created_at: String(item.created_at || new Date(0).toISOString()),
+      link: item.link == null ? null : String(item.link),
+    }))
+    .filter((item) => item.id);
+};
+
 
 interface DashboardLayoutProps {
   children: React.ReactNode;
@@ -103,8 +141,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { toast } = useToast();
-  const { platformLogo } = usePlatformSettings();
-
   const { theme, setTheme } = useTheme();
 
   useEffect(() => {
@@ -136,7 +172,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       if (papers) {
         const interests: string[] = [];
         papers.forEach((paper) => {
-          if (paper.keywords) interests.push(...paper.keywords);
+          interests.push(...toStringList(paper.keywords));
           if (paper.research_field) interests.push(paper.research_field);
         });
         setUserInterests([...new Set(interests.map((i) => i.toLowerCase()))]);
@@ -182,7 +218,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         if (newPaper.author_id === user.id) return;
 
         // Check if paper matches user interests
-        const paperKeywords = (newPaper.keywords || []).map((k: string) => k.toLowerCase());
+        const paperKeywords = toStringList(newPaper.keywords).map((k) => k.toLowerCase());
         const paperField = (newPaper.research_field || "").toLowerCase();
 
         const hasMatch = userInterests.some(
@@ -229,7 +265,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
         if (newPaper.author_id === user.id) return;
 
         // Check if paper matches user interests
-        const paperKeywords = (newPaper.keywords || []).map((k: string) => k.toLowerCase());
+        const paperKeywords = toStringList(newPaper.keywords).map((k) => k.toLowerCase());
         const paperField = (newPaper.research_field || "").toLowerCase();
 
         const hasMatch = userInterests.some(
@@ -355,12 +391,14 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       const { data, error } = await supabase.
       from("notifications").
       select("*").
+      eq("user_id", user?.id).
       order("created_at", { ascending: false }).
       limit(10);
 
       if (error) throw error;
-      setNotifications(data || []);
-      setUnreadCount(data?.filter((n) => !n.is_read).length || 0);
+      const normalized = normalizeNotifications(data);
+      setNotifications(normalized);
+      setUnreadCount(normalized.filter((n) => !n.is_read).length);
     } catch (error) {
       console.error("Error fetching notifications:", error);
     }
@@ -379,7 +417,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   const markAllAsRead = async () => {
     try {
-      await supabase.from("notifications").update({ is_read: true }).eq("is_read", false);
+      await supabase.from("notifications").update({ is_read: true }).eq("user_id", user?.id).eq("is_read", false);
 
       setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
       setUnreadCount(0);
@@ -413,17 +451,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
         <div className="p-4 border-b border-border flex-shrink-0">
           <Link to="/" className="flex items-center gap-2">
-            {platformLogo ?
-            <img src={platformLogo} alt="Logo" className="w-10 h-10 rounded-2xl object-contain" /> :
-
-            <div className="w-10 h-10 rounded-xl gradient-hero flex items-center justify-center shadow-lg overflow-hidden">
-                <img
-                src="/placeholder.svg"
-                alt="Logo"
-                className="w-full h-full object-cover" />
-
-              </div>
-            }
+            <AppLogo className="w-10 h-10 rounded-2xl" />
             <div>
               <span className="font-bold text-lg text-foreground">R2P CONNECT</span>
               <span className="block text-xs text-primary">Research2Practice</span>

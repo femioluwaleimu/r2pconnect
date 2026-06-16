@@ -14,6 +14,7 @@ import {
 import { ArrowLeft, Receipt, Download, Eye, CreditCard } from "lucide-react";
 import { Link } from "react-router-dom";
 import { formatLagos } from "@/lib/dateUtils";
+import { formatAmount as formatPlainAmount, toNumber } from "@/lib/numberFormat";
 
 interface PaymentRecord {
   id: string;
@@ -50,7 +51,11 @@ export default function PaymentHistory() {
         .order("created_at", { ascending: false });
 
       if (!error && data) {
-        setPayments(data as PaymentRecord[]);
+        setPayments((data as PaymentRecord[]).map((payment) => ({
+          ...payment,
+          amount: toNumber(payment.amount),
+          discount_amount: payment.discount_amount == null ? null : toNumber(payment.discount_amount),
+        })));
       }
     } catch (error) {
       console.error("Error fetching payments:", error);
@@ -61,7 +66,7 @@ export default function PaymentHistory() {
 
   const formatAmount = (amount: number, currency: string) => {
     const symbol = currency === "NGN" ? "₦" : currency === "USD" ? "$" : currency;
-    return `${symbol}${amount.toLocaleString()}`;
+    return `${symbol}${formatPlainAmount(amount)}`;
   };
 
   return (

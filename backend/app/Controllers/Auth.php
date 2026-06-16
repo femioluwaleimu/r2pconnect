@@ -12,10 +12,40 @@ use App\Models\User;
 
 class Auth extends Controller {
     private User $userModel;
+    private array $tableColumns = [];
 
     public function __construct() {
         parent::__construct();
         $this->userModel = new User();
+    }
+
+    private function getTableColumns(string $table): array {
+        if (!isset($this->tableColumns[$table])) {
+            $rows = $this->db->getAll("SHOW COLUMNS FROM `{$table}`");
+            $this->tableColumns[$table] = array_column($rows, 'Field');
+        }
+
+        return $this->tableColumns[$table];
+    }
+
+    private function insertExistingColumns(string $table, array $values): void {
+        $columns = $this->getTableColumns($table);
+        $filtered = array_filter(
+            $values,
+            fn($_value, $key) => in_array($key, $columns, true),
+            ARRAY_FILTER_USE_BOTH
+        );
+
+        if (empty($filtered)) {
+            return;
+        }
+
+        $columnSql = implode(', ', array_map(fn($column) => "`{$column}`", array_keys($filtered)));
+        $placeholders = implode(', ', array_fill(0, count($filtered), '?'));
+        $this->db->execute(
+            "INSERT INTO `{$table}` ({$columnSql}) VALUES ({$placeholders})",
+            array_values($filtered)
+        );
     }
 
     /**
@@ -32,35 +62,86 @@ class Auth extends Controller {
 
         $email = $this->input('email');
         $password = $this->input('password');
+        if (!preg_match('/[A-Za-z]/', $password) || !preg_match('/\d/', $password)) {
+            Response::validationError([
+                'password' => ['Password is too weak. Use at least 8 characters with one letter and one number.'],
+            ]);
+            return;
+        }
         $firstName = $this->input('first_name', '');
         $lastName = $this->input('last_name', '');
+        $fullName = trim((string)$this->input('full_name', ''));
+        if ($fullName === '') {
+            $fullName = trim($firstName . ' ' . $lastName);
+        }
+        if ($fullName === '') {
+            $fullName = explode('@', $email)[0] ?? $email;
+        }
+        $role = (string)$this->input('role', 'researcher');
+        $institutionId = $this->input('institution_id');
+        $department = trim((string)$this->input('department', ''));
+        $phoneNumber = trim((string)$this->input('phone_number', ''));
+        $researcherType = $this->input('researcher_type');
+        $assignedSupervisorId = $this->input('assigned_supervisor_id');
+        $academicRank = trim((string)$this->input('academic_rank', ''));
+        $staffId = trim((string)$this->input('staff_id', ''));
 
         try {
+            $this->db->beginTransaction();
+
             // Create user
             $user = $this->userModel->createUser([
                 'email' => $email,
                 'password' => $password,
+                'display_name' => $fullName,
             ]);
 
             if (!$user) {
+                $this->db->rollback();
                 Response::error('Failed to create user', 500);
                 return;
             }
 
-            // Create user profile
+            // Create profile
             $userId = $user['id'];
-            $sql = "
-                INSERT INTO user_profiles (id, user_id, first_name, last_name, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ";
-            $this->db->execute($sql, [
-                generateUUID(),
-                $userId,
-                $firstName,
-                $lastName,
-                date('Y-m-d H:i:s'),
-                date('Y-m-d H:i:s'),
+            $this->insertExistingColumns('profiles', [
+                'id' => generateUUID(),
+                'user_id' => $userId,
+                'full_name' => $fullName,
+                'email' => $email,
+                'phone_number' => $phoneNumber !== '' ? $phoneNumber : null,
+                'institution_id' => $institutionId ?: null,
+                'department' => $department !== '' ? $department : null,
+                'researcher_type' => $researcherType ?: null,
+                'assigned_supervisor_id' => $assignedSupervisorId ?: null,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
             ]);
+
+            // Assign role
+            $this->insertExistingColumns('user_roles', [
+                'id' => generateUUID(),
+                'user_id' => $userId,
+                'role' => $role,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            // Create supervisor record immediately for supervisor registrations.
+            if ($role === 'supervisor') {
+                $this->insertExistingColumns('supervisors', [
+                    'id' => generateUUID(),
+                    'user_id' => $userId,
+                    'institution_id' => $institutionId ?: null,
+                    'department' => $department !== '' ? $department : null,
+                    'academic_rank' => $academicRank !== '' ? $academicRank : null,
+                    'staff_id' => $staffId !== '' ? $staffId : null,
+                    'is_active' => 0,
+                    'verification_status' => 'pending_verification',
+                    'created_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ]);
+            }
 
             // Generate token
             $token = JWT::generate([
@@ -69,11 +150,23 @@ class Auth extends Controller {
                 'type' => 'access'
             ]);
 
+            $this->db->commit();
+
+            $user['full_name'] = $fullName;
+            $user['role'] = $role;
+            $user['institution_id'] = $institutionId ?: null;
+            $user['department'] = $department !== '' ? $department : null;
+
             Response::created([
                 'user' => $user,
                 'token' => $token
             ]);
         } catch (\Exception $e) {
+            try {
+                $this->db->rollback();
+            } catch (\Throwable $rollbackError) {
+                error_log("Registration rollback error: " . $rollbackError->getMessage());
+            }
             error_log("Registration error: " . $e->getMessage());
             Response::error(
                 getenv('APP_DEBUG') === 'true' ? 'Registration failed: ' . $e->getMessage() : 'Registration failed',

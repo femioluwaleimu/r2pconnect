@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Users, Plus, CheckCircle, Clock, Calendar, Wallet, ListTodo, BadgeCheck } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { formatLagos } from "@/lib/dateUtils";
+import { formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 interface HiredStudent {
   id: string;
@@ -99,6 +100,11 @@ export default function IndustryHiredStudents() {
         const profile = profileMap.get(h.student_id);
         return {
           ...h,
+          total_payment: toNumber(h.total_payment),
+          job_postings: h.job_postings ? {
+            ...h.job_postings,
+            payment_amount: h.job_postings.payment_amount == null ? null : toNumber(h.job_postings.payment_amount),
+          } : h.job_postings,
           profiles: profile ? { full_name: profile.full_name, email: profile.email, is_verified: profile.is_verified, avatar_url: profile.avatar_url } : undefined,
           institution: profile?.institution || null
         };
@@ -306,7 +312,7 @@ export default function IndustryHiredStudents() {
             <CardContent className="p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-2xl font-bold">₦{hiredStudents.reduce((a, h) => a + h.total_payment, 0).toLocaleString()}</p>
+                  <p className="text-2xl font-bold">{formatCurrencyAmount(hiredStudents.reduce((a, h) => a + h.total_payment, 0))}</p>
                   <p className="text-sm opacity-80">Total Paid</p>
                 </div>
                 <Wallet className="w-8 h-8 opacity-80" />

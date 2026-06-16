@@ -230,6 +230,15 @@ class PhpQueryBuilder implements PromiseLike<{ data: any; error: any; count?: nu
 }
 
 function createStorageBucket(bucket: string) {
+  const encodePublicPath = (path: string) => {
+    const bytes = new TextEncoder().encode(path);
+    let binary = "";
+    bytes.forEach((byte) => {
+      binary += String.fromCharCode(byte);
+    });
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  };
+
   return {
     async upload(path: string, file: File | Blob) {
       const form = new FormData();
@@ -248,12 +257,26 @@ function createStorageBucket(bucket: string) {
         return { data: null, error };
       }
     },
-    async createSignedUrl(path: string) {
+    async createSignedUrl(path: string, _expiresIn?: number) {
       return phpRequest<{ data: { signedUrl: string }; error: unknown }>(`/storage/${bucket}/signed-url`, { path });
     },
+    async download(path: string) {
+      try {
+        const { data: { publicUrl } } = this.getPublicUrl(path);
+        const response = await fetch(publicUrl, {
+          headers: getToken() ? { Authorization: `Bearer ${getToken()}` } : undefined,
+        });
+        if (!response.ok) {
+          return { data: null, error: new Error(`Download failed with status ${response.status}`) };
+        }
+
+        return { data: await response.blob(), error: null };
+      } catch (error) {
+        return { data: null, error };
+      }
+    },
     getPublicUrl(path: string) {
-      const base = API_BASE_URL.replace(/\/api\.php$/, "");
-      return { data: { publicUrl: `${base}/storage/uploads/${bucket}/${path}` } };
+      return { data: { publicUrl: `${API_BASE_URL}?/storage/${encodeURIComponent(bucket)}/public/${encodePublicPath(path)}` } };
     },
   };
 }
@@ -294,6 +317,7 @@ export const supabase = {
         const data = {
           email: payload.email,
           password: payload.password,
+          ...(payload.options?.data ?? {}),
           first_name: payload.options?.data?.first_name ?? payload.options?.data?.firstName ?? "",
           last_name: payload.options?.data?.last_name ?? payload.options?.data?.lastName ?? "",
         };
@@ -311,13 +335,16 @@ export const supabase = {
       clearSession();
       return { error: null };
     },
-    async updateUser(values: { password?: string; data?: Record<string, unknown> }) {
+    async updateUser(values: { password?: string; currentPassword?: string; current_password?: string; data?: Record<string, unknown> }) {
       try {
         if (values.password) {
           await apiRequest("/users/password/change", {
             method: "POST",
             token: getToken(),
-            body: JSON.stringify({ new_password: values.password }),
+            body: JSON.stringify({
+              current_password: values.currentPassword ?? values.current_password,
+              new_password: values.password,
+            }),
           });
         }
         return { data: { user: getStoredUser() }, error: null };

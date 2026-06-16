@@ -13,7 +13,7 @@ export default defineConfig(() => ({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.ico", "placeholder.svg"],
+      includeAssets: ["favicon.ico", "app-logo-192.png", "app-logo-512.png", "app-logo-maskable-512.png"],
       manifest: {
         name: "R2P Connect - Research2Practice",
         short_name: "R2P Connect",
@@ -26,19 +26,32 @@ export default defineConfig(() => ({
         start_url: "/",
         icons: [
           {
-            src: "/placeholder.svg",
+            src: "/app-logo-192.png",
             sizes: "192x192",
-            type: "image/svg+xml",
+            type: "image/png",
           },
           {
-            src: "/placeholder.svg",
+            src: "/app-logo-512.png",
             sizes: "512x512",
-            type: "image/svg+xml",
+            type: "image/png",
+          },
+          {
+            src: "/app-logo-maskable-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
           },
         ],
       },
       workbox: {
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,jpg,jpeg}"],
+        globPatterns: [
+          "index.html",
+          "manifest.webmanifest",
+          "registerSW.js",
+          "assets/index-*.js",
+          "assets/index-*.css",
+          "*.{ico,png,svg,jpg,jpeg}",
+        ],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         cleanupOutdatedCaches: true,
         skipWaiting: true,

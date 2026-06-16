@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/context/CurrencyContext";
 import { Building2, Mail, Camera, Shield, Info, Globe, MapPin, Loader2, Eye, EyeOff } from "lucide-react";
+import { prepareAvatarImage } from "@/lib/avatarImage";
 
 interface Profile {
   full_name: string;
@@ -111,22 +112,18 @@ export default function IndustryProfile() {
     const file = e.target.files?.[0];
     if (!file || !user) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-      toast({ title: "File too large", description: "Maximum file size is 5MB", variant: "destructive" });
-      return;
-    }
-
     setLoading(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const filePath = `${user.id}/logo.${fileExt}`;
+      const avatarFile = await prepareAvatarImage(file);
+      const filePath = `${user.id}/logo.jpg`;
 
-      const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file, { upsert: true });
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, avatarFile, { upsert: true });
       if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath);
-      setProfile(prev => ({ ...prev, avatar_url: publicUrl }));
-      await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('user_id', user.id);
+      const avatarUrl = `${publicUrl}?t=${Date.now()}`;
+      setProfile(prev => ({ ...prev, avatar_url: avatarUrl }));
+      await supabase.from('profiles').update({ avatar_url: avatarUrl }).eq('user_id', user.id);
       toast({ title: "Logo uploaded successfully" });
     } catch (error: any) {
       toast({ title: "Error uploading logo", description: error.message, variant: "destructive" });
@@ -138,8 +135,13 @@ export default function IndustryProfile() {
   const handleChangePassword = async () => {
     if (!user?.email) return;
     
-    if (newPassword.length < 6) {
-      toast({ title: "Password too short", description: "Password must be at least 6 characters", variant: "destructive" });
+    if (!oldPassword || !newPassword || !confirmPassword) {
+      toast({ title: "Please fill in all password fields", variant: "destructive" });
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      toast({ title: "Password too short", description: "Password must be at least 8 characters", variant: "destructive" });
       return;
     }
     
@@ -150,20 +152,8 @@ export default function IndustryProfile() {
 
     setPasswordLoading(true);
     try {
-      // Verify old password by signing in
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: user.email,
-        password: oldPassword,
-      });
-
-      if (signInError) {
-        toast({ title: "Incorrect current password", variant: "destructive" });
-        setPasswordLoading(false);
-        return;
-      }
-
       // Update password
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      const { error } = await supabase.auth.updateUser({ currentPassword: oldPassword, password: newPassword });
       if (error) throw error;
 
       toast({ title: "Password changed successfully" });
@@ -223,7 +213,7 @@ export default function IndustryProfile() {
                     <Button variant="outline" className="rounded-xl" asChild disabled={loading}><span>{loading ? "Uploading..." : "Upload Logo"}</span></Button>
                   </Label>
                   <Input id="logo" type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
-                  <p className="text-xs text-muted-foreground">JPG, PNG up to 5MB</p>
+                  <p className="text-xs text-muted-foreground">Auto-cropped square, compressed to 50KB</p>
                 </div>
               </div>
             </CardContent>

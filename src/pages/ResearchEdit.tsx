@@ -447,6 +447,9 @@ export default function ResearchEdit() {
         status,
         research_field: formData.researchField || null,
         allow_download: formData.allowDownload,
+        download_credit_cost: researchType === 'completed' && formData.allowDownload
+          ? Math.max(0, formData.downloadCreditCost)
+          : 0,
         author_names: formData.authorNames.length > 0 ? formData.authorNames : null,
       };
 
@@ -1223,7 +1226,21 @@ export default function ResearchEdit() {
                         onCheckedChange={(checked) => setFormData({ ...formData, allowDownload: checked })}
                       />
                     </div>
-                    {formData.allowDownload && (
+                    {formData.allowDownload && !isStudent && (
+                      <div className="pt-3 border-t">
+                        <Label className="text-sm font-medium">Download Cost (credits)</Label>
+                        <p className="text-xs text-muted-foreground mb-2">Set how many credits others need to download this completed research.</p>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={formData.downloadCreditCost}
+                          onChange={(e) => setFormData({ ...formData, downloadCreditCost: Math.max(0, parseInt(e.target.value, 10) || 0) })}
+                          className="mt-1.5 rounded-xl"
+                        />
+                      </div>
+                    )}
+                    {formData.allowDownload && isStudent && (
                       <p className="text-xs text-muted-foreground pt-3 border-t">
                         Download credit cost is set by your institution.
                       </p>

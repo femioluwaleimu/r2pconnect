@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { handleEdgeFunctionResponse } from "@/lib/edgeFunctionError";
 import { Wallet, Plus, ArrowUpRight, ArrowDownRight, CreditCard, TrendingUp } from "lucide-react";
 import { formatLagos } from "@/lib/dateUtils";
+import { formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 interface WalletData {
   id: string;
@@ -63,7 +64,12 @@ export default function IndustryWallet() {
         data = newWallet;
       }
 
-      setWallet(data);
+      setWallet(data ? {
+        ...data,
+        balance: toNumber(data.balance),
+        total_funded: toNumber(data.total_funded),
+        total_spent: toNumber(data.total_spent),
+      } : null);
     } catch (error: any) {
       console.error('Error fetching wallet:', error);
     } finally {
@@ -82,7 +88,10 @@ export default function IndustryWallet() {
       .order('created_at', { ascending: false })
       .limit(20);
 
-    setTransactions(data || []);
+    setTransactions((data || []).map((tx) => ({
+      ...tx,
+      amount: toNumber(tx.amount),
+    })));
   };
 
   const handleFundWallet = async (e: React.FormEvent) => {
@@ -150,7 +159,7 @@ export default function IndustryWallet() {
       }
 
       if (result?.success || result?.status === 'success') {
-        toast({ title: "Wallet funded successfully!", description: `₦${result.amount?.toLocaleString() || ''} added to your wallet` });
+        toast({ title: "Wallet funded successfully!", description: `${formatCurrencyAmount(result.amount)} added to your wallet` });
         fetchWallet();
         fetchTransactions();
         setFundDialogOpen(false);
@@ -212,7 +221,7 @@ export default function IndustryWallet() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm opacity-80">Available Balance</p>
-                  <p className="text-3xl font-bold mt-1">₦{wallet?.balance?.toLocaleString() || '0'}</p>
+                  <p className="text-3xl font-bold mt-1">{formatCurrencyAmount(wallet?.balance)}</p>
                 </div>
                 <Wallet className="w-12 h-12 opacity-80" />
               </div>
@@ -223,7 +232,7 @@ export default function IndustryWallet() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm opacity-80">Total Funded</p>
-                  <p className="text-3xl font-bold mt-1">₦{wallet?.total_funded?.toLocaleString() || '0'}</p>
+                  <p className="text-3xl font-bold mt-1">{formatCurrencyAmount(wallet?.total_funded)}</p>
                 </div>
                 <TrendingUp className="w-12 h-12 opacity-80" />
               </div>
@@ -234,7 +243,7 @@ export default function IndustryWallet() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm opacity-80">Total Spent</p>
-                  <p className="text-3xl font-bold mt-1">₦{wallet?.total_spent?.toLocaleString() || '0'}</p>
+                  <p className="text-3xl font-bold mt-1">{formatCurrencyAmount(wallet?.total_spent)}</p>
                 </div>
                 <CreditCard className="w-12 h-12 opacity-80" />
               </div>
@@ -273,7 +282,7 @@ export default function IndustryWallet() {
                     </div>
                     <div className="text-right">
                       <p className={`font-semibold ${tx.amount > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {tx.amount > 0 ? '+' : ''}₦{Math.abs(tx.amount).toLocaleString()}
+                        {tx.amount > 0 ? '+' : ''}{formatCurrencyAmount(Math.abs(tx.amount))}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {formatLagos(tx.created_at)}

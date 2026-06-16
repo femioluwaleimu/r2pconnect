@@ -8,6 +8,27 @@ import { Percent, Users, GraduationCap, Building2, Loader2, Save } from "lucide-
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 
+const createUuid = () => {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return cryptoApi.randomUUID();
+  }
+
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const rand = Math.floor(Math.random() * 16);
+    const value = char === "x" ? rand : (rand & 0x3) | 0x8;
+    return value.toString(16);
+  });
+};
+
 export default function AdminCommissionSettings() {
   const [rates, setRates] = useState({
     supervisor_commission_rate: "5",
@@ -20,6 +41,7 @@ export default function AdminCommissionSettings() {
     ipn_share_percent: "80",
     ipn_platform_share_percent: "20",
   });
+  const [settingIds, setSettingIds] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const { toast } = useToast();
@@ -31,16 +53,21 @@ export default function AdminCommissionSettings() {
   const fetchRates = async () => {
     const { data } = await supabase
       .from("platform_settings")
-      .select("key, value")
+      .select("id, key, value")
       .in("key", ["supervisor_commission_rate", "referrer_commission_rate", "institution_commission_rate", "download_student_share", "download_supervisor_share", "download_institution_share", "download_platform_share", "ipn_share_percent", "ipn_platform_share_percent"]);
 
     if (data) {
       const obj = { ...rates };
+      const ids: Record<string, string> = {};
       data.forEach((item) => {
+        if (item.id) {
+          ids[item.key] = item.id;
+        }
         if (item.key in obj) {
           (obj as any)[item.key] = item.value || "0";
         }
       });
+      setSettingIds(ids);
       setRates(obj);
     }
     setLoading(false);
@@ -48,26 +75,46 @@ export default function AdminCommissionSettings() {
 
   const handleSave = async () => {
     setSaving(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error("Not authenticated");
 
-    for (const [key, value] of Object.entries(rates)) {
-      const numVal = parseFloat(value);
-      if (isNaN(numVal) || numVal < 0 || numVal > 100) {
-        toast({ title: "Invalid value", description: `${key.replace(/_/g, " ")} must be between 0 and 100`, variant: "destructive" });
-        setSaving(false);
-        return;
+      for (const [key, value] of Object.entries(rates)) {
+        const numVal = parseFloat(value);
+        if (isNaN(numVal) || numVal < 0 || numVal > 100) {
+          throw new Error(`${key.replace(/_/g, " ")} must be between 0 and 100`);
+        }
       }
-      await supabase.from("platform_settings").upsert({
+
+      const settingsToSave = Object.entries(rates).map(([key, value]) => ({
+        id: settingIds[key] || createUuid(),
         key,
-        value: String(numVal),
+        value: String(parseFloat(value)),
         type: "number",
         updated_by: user.id,
-      }, { onConflict: "key" });
-    }
+      }));
 
-    toast({ title: "Commission rates saved successfully" });
-    setSaving(false);
+      for (const setting of settingsToSave) {
+        const { error } = await supabase
+          .from("platform_settings")
+          .upsert(setting, { onConflict: "key" });
+
+        if (error) {
+          throw new Error(`${setting.key.replace(/_/g, " ")}: ${error.message}`);
+        }
+      }
+
+      setSettingIds(prev => ({
+        ...prev,
+        ...Object.fromEntries(settingsToSave.map(setting => [setting.key, setting.id])),
+      }));
+
+      toast({ title: "Commission rates saved successfully" });
+    } catch (error: any) {
+      toast({ title: "Error saving commission rates", description: error.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (loading) {

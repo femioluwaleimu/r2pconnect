@@ -332,7 +332,6 @@ class AIController extends Controller {
             'topics' => $topics,
             'score' => 0,
             'tokens_used' => $response['usage']['total_tokens'] ?? null,
-            'provider' => $response['provider'],
             'success' => true,
         ];
     }

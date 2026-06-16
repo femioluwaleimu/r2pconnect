@@ -13,6 +13,7 @@ import { Play, Eye, Calendar, ArrowLeft, Building2, FileText, User, Bell, BellOf
 import { useToast } from "@/hooks/use-toast";
 import { useSEO } from "@/hooks/useSEO";
 import { formatLagos } from "@/lib/dateUtils";
+import { getSignedUrl, isFullUrl } from "@/hooks/useSignedUrl";
 
 interface Documentary {
   id: string;
@@ -187,7 +188,7 @@ export default function DocumentaryDetailsPublic() {
           .neq("id", docData.id)
           .order("views_count", { ascending: false })
           .limit(4);
-        if (relatedData) setRelatedDocs(relatedData);
+        if (relatedData) setRelatedDocs(await resolveThumbnails(relatedData));
       }
     }
 
@@ -199,7 +200,7 @@ export default function DocumentaryDetailsPublic() {
         .neq("id", docData.id)
         .order("views_count", { ascending: false })
         .limit(4);
-      if (popularDocs) setRelatedDocs(popularDocs);
+      if (popularDocs) setRelatedDocs(await resolveThumbnails(popularDocs));
     }
 
     setLoading(false);
@@ -213,6 +214,27 @@ export default function DocumentaryDetailsPublic() {
   const getYouTubeThumbnail = (url: string) => {
     const videoId = getYouTubeId(url);
     return videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : null;
+  };
+
+  const resolveThumbnail = async (doc: Documentary): Promise<Documentary> => {
+    if (doc.thumbnail_url) {
+      if (isFullUrl(doc.thumbnail_url)) {
+        return doc;
+      }
+
+      const signedUrl = await getSignedUrl("documentaries", doc.thumbnail_url);
+      if (signedUrl) {
+        return { ...doc, thumbnail_url: signedUrl };
+      }
+    }
+
+    const youtubeThumbnail = doc.video_url ? getYouTubeThumbnail(doc.video_url) : null;
+    return youtubeThumbnail ? { ...doc, thumbnail_url: youtubeThumbnail } : doc;
+  };
+
+  const resolveThumbnails = async (docs: Documentary[]) => {
+    const resolved = await Promise.all(docs.map(resolveThumbnail));
+    return resolved;
   };
 
   if (loading) {

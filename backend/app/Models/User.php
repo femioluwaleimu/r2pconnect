@@ -9,6 +9,7 @@ use App\Core\Model;
 
 class User extends Model {
     protected string $table = 'users';
+    private ?array $userColumns = null;
 
     /**
      * Find user by email
@@ -58,7 +59,22 @@ class User extends Model {
         $data['created_at'] = $data['created_at'] ?? date('Y-m-d H:i:s');
         $data['updated_at'] = $data['updated_at'] ?? date('Y-m-d H:i:s');
 
+        $data = $this->filterExistingUserColumns($data);
+
         return parent::create($data);
+    }
+
+    private function filterExistingUserColumns(array $data): array {
+        if ($this->userColumns === null) {
+            $rows = $this->db->getAll("SHOW COLUMNS FROM `{$this->table}`");
+            $this->userColumns = array_column($rows, 'Field');
+        }
+
+        return array_filter(
+            $data,
+            fn($_value, $key) => in_array($key, $this->userColumns, true),
+            ARRAY_FILTER_USE_BOTH
+        );
     }
 
     private function normalizeUserRow(array $user): array {

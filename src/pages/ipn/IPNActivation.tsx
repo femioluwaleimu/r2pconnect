@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Shield, Upload, CreditCard, CheckCircle, Loader2, FileText, ArrowRight, AlertTriangle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 export default function IPNActivation() {
   const [step, setStep] = useState<"loading" | "upload_id" | "payment" | "pending_review" | "rejected" | "activated">("loading");
@@ -31,7 +32,7 @@ export default function IPNActivation() {
       .select("value")
       .eq("key", "ipn_activation_fee_ngn")
       .maybeSingle();
-    if (feeSetting?.value) setActivationFee(Number(feeSetting.value));
+    if (feeSetting?.value) setActivationFee(toNumber(feeSetting.value, 5000));
 
     const { data: activation } = await supabase
       .from("ipn_activations")
@@ -346,7 +347,7 @@ export default function IPNActivation() {
               </div>
               <div className="bg-muted/50 rounded-xl p-4">
                 <p className="text-xs text-muted-foreground">
-                  <strong>Activation Fee:</strong> ₦{activationFee.toLocaleString()} (one-time payment after upload)
+                  <strong>Activation Fee:</strong> {formatCurrencyAmount(activationFee)} (one-time payment after upload)
                 </p>
               </div>
             </CardContent>
@@ -371,7 +372,7 @@ export default function IPNActivation() {
               </div>
               <div className="bg-muted/50 rounded-xl p-5 text-center">
                 <p className="text-sm text-muted-foreground mb-1">Amount to Pay</p>
-                <p className="text-3xl font-bold text-foreground">₦{activationFee.toLocaleString()}</p>
+                <p className="text-3xl font-bold text-foreground">{formatCurrencyAmount(activationFee)}</p>
                 <Badge variant="secondary" className="mt-2 rounded-full">One-time fee</Badge>
               </div>
               <Button
@@ -382,7 +383,7 @@ export default function IPNActivation() {
                 {paying ? (
                   <><Loader2 className="w-5 h-5 mr-2 animate-spin" />Processing...</>
                 ) : (
-                  <><CreditCard className="w-5 h-5 mr-2" />Pay ₦{activationFee.toLocaleString()}</>
+                  <><CreditCard className="w-5 h-5 mr-2" />Pay {formatCurrencyAmount(activationFee)}</>
                 )}
               </Button>
               <p className="text-xs text-center text-muted-foreground">

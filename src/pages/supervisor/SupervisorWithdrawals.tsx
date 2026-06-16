@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { ArrowUpRight, Wallet, Clock, CheckCircle, XCircle, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { formatLagos } from "@/lib/dateUtils";
+import { formatCurrencyAmount, toNumber } from "@/lib/numberFormat";
 
 interface Withdrawal {
   id: string;
@@ -50,7 +51,7 @@ export default function SupervisorWithdrawals() {
       .eq("user_id", userId)
       .maybeSingle();
 
-    setBalance(wallet?.balance || 0);
+    setBalance(toNumber(wallet?.balance));
 
     const { data } = await supabase
       .from("supervisor_withdrawals")
@@ -58,7 +59,10 @@ export default function SupervisorWithdrawals() {
       .eq("supervisor_id", userId)
       .order("created_at", { ascending: false });
 
-    setWithdrawals(data || []);
+    setWithdrawals((data || []).map((withdrawal) => ({
+      ...withdrawal,
+      amount: toNumber(withdrawal.amount),
+    })));
     setLoading(false);
   };
 
@@ -143,7 +147,7 @@ export default function SupervisorWithdrawals() {
               <div className="space-y-4 pt-4">
                 <div className="p-3 rounded-xl bg-emerald-500/10 text-center">
                   <p className="text-sm text-muted-foreground">Available Balance</p>
-                  <p className="text-2xl font-bold text-emerald-600">₦{balance.toLocaleString()}</p>
+                  <p className="text-2xl font-bold text-emerald-600">{formatCurrencyAmount(balance)}</p>
                 </div>
                 <div>
                   <Label>Amount (₦)</Label>
@@ -179,7 +183,7 @@ export default function SupervisorWithdrawals() {
               </div>
               <div>
                 <p className="text-white/80 text-sm">Available Balance</p>
-                <p className="text-3xl font-bold">₦{balance.toLocaleString()}</p>
+                <p className="text-3xl font-bold">{formatCurrencyAmount(balance)}</p>
               </div>
             </div>
           </CardContent>
@@ -201,7 +205,7 @@ export default function SupervisorWithdrawals() {
                 {withdrawals.map((w) => (
                   <div key={w.id} className="flex items-center justify-between p-4 rounded-xl bg-muted/30">
                     <div>
-                      <p className="font-medium text-foreground">₦{w.amount.toLocaleString()}</p>
+                      <p className="font-medium text-foreground">{formatCurrencyAmount(w.amount)}</p>
                       <p className="text-sm text-muted-foreground">
                         {w.bank_name} • {w.account_number} • {formatLagos(w.created_at)}
                       </p>
