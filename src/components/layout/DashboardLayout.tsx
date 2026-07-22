@@ -43,6 +43,7 @@ import {
   Bot } from
 "lucide-react";
 import { cn } from "@/lib/utils";
+import SupportChatbot from "@/components/support/SupportChatbot";
 
 interface Notification {
   id: string;
@@ -616,6 +617,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
         {/* Page Content */}
         <main className="flex-1 p-4 lg:p-6 overflow-auto mx-0 my-0">{children}</main>
+        {user && <SupportChatbot userRole="researcher" />}
       </div>
     </div>);
 

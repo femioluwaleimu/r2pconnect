@@ -23,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Users, Loader2, ArrowRight, Info } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { createAppNotification } from "@/lib/notifications";
 
 interface Supervisor {
   user_id: string;
@@ -187,12 +188,12 @@ export default function SwitchToHumanSupervisor({
 
       // Create notification for supervisor
       if (supervisor) {
-        await supabase.rpc('create_notification', {
-          _user_id: selectedSupervisorId,
-          _title: 'New Research Assignment',
-          _message: `${student?.full_name || 'A student'} has assigned you as supervisor for "${research?.title || 'their research'}".`,
-          _type: 'info',
-          _link: '/supervisor/pending',
+        await createAppNotification({
+          userId: selectedSupervisorId,
+          title: 'New Research Assignment',
+          message: `${student?.full_name || 'A student'} has assigned you as supervisor for "${research?.title || 'their research'}".`,
+          type: 'info',
+          link: '/supervisor/pending',
         });
 
         // Send email notification

@@ -69,24 +69,65 @@ export default function ReferralCard() {
     return code;
   };
 
+  const generateId = () => {
+    if (crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+
+    return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+      const random = Math.floor(Math.random() * 16);
+      const value = char === "x" ? random : (random & 0x3) | 0x8;
+      return value.toString(16);
+    });
+  };
+
   const createReferralCode = async () => {
     setGenerating(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
 
-      const code = generateCode();
-      const { data, error } = await supabase
-        .from("referral_codes")
-        .insert({ user_id: user.id, code })
-        .select("id, code, total_referrals")
-        .single();
+      let data: ReferralCode | null = null;
+      let lastError: any = null;
 
-      if (error) throw error;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const code = generateCode();
+        const now = new Date().toISOString();
+        const result = await supabase
+          .from("referral_codes")
+          .insert({
+            id: generateId(),
+            user_id: user.id,
+            code,
+            total_referrals: 0,
+            credits_earned: 0,
+            created_at: now,
+            updated_at: now,
+          })
+          .select("id, code, total_referrals")
+          .single();
+
+        if (!result.error) {
+          data = result.data;
+          break;
+        }
+
+        lastError = result.error;
+        const message = String(result.error?.message || "");
+        if (!/duplicate|unique|code/i.test(message)) {
+          break;
+        }
+      }
+
+      if (!data) throw lastError || new Error("Unable to generate referral code");
       setReferralCode(data);
       toast({ title: "Referral code created!" });
     } catch (error: any) {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+      toast({
+        title: "Error",
+        description: error?.message || "Unable to generate referral code. Please try again.",
+        variant: "destructive",
+      });
     } finally {
       setGenerating(false);
     }

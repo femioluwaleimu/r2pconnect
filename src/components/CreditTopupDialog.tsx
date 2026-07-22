@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { handleEdgeFunctionResponse } from "@/lib/edgeFunctionError";
-import { formatCurrencyAmount } from "@/lib/numberFormat";
+import { useCurrency } from "@/context/CurrencyContext";
 import { Zap, Loader2, Sparkles } from "lucide-react";
 
 interface TopupPackage {
@@ -26,6 +26,7 @@ export default function CreditTopupDialog({ onSuccess, trigger }: CreditTopupDia
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState<string | null>(null);
   const { toast } = useToast();
+  const { formatCurrency } = useCurrency();
 
   useEffect(() => {
     if (open) fetchPackages();
@@ -155,7 +156,7 @@ export default function CreditTopupDialog({ onSuccess, trigger }: CreditTopupDia
                     {purchasing === pkg.id ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
-                      formatCurrencyAmount(pkg.amount_ngn)
+                      formatCurrency(pkg.amount_ngn, "NGN")
                     )}
                   </Button>
                 </CardContent>

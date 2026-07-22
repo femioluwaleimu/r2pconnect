@@ -17,7 +17,6 @@ const Landing = lazy(() => import("./pages/Landing"));
 const Auth = lazy(() => import("./pages/Auth"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const MyResearch = lazy(() => import("./pages/MyResearch"));
-const ResearchUpload = lazy(() => import("./pages/ResearchUpload"));
 const StudentResearchStart = lazy(() => import("./pages/StudentResearchStart"));
 const CompletedResearchUpload = lazy(() => import("./pages/CompletedResearchUpload"));
 const AIAssistant = lazy(() => import("./pages/AIAssistant"));
@@ -120,6 +119,7 @@ const AdminSubscriptions = lazy(() => import("./pages/admin/AdminSubscriptions")
 const AdminWithdrawals = lazy(() => import("./pages/admin/AdminWithdrawals"));
 const AdminCoupons = lazy(() => import("./pages/admin/AdminCoupons"));
 const AdminSupervisors = lazy(() => import("./pages/admin/AdminSupervisors"));
+const AdminSupportRequests = lazy(() => import("./pages/admin/AdminSupportRequests"));
 
 // Reviewer pages
 const ReviewerDashboard = lazy(() => import("./pages/reviewer/ReviewerDashboard"));
@@ -253,14 +253,6 @@ const App = () => (
                     element={
                       <ProtectedRoute allowedRoles={["researcher"]}>
                         <MyResearch />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/dashboard/research/upload"
-                    element={
-                      <ProtectedRoute allowedRoles={["researcher"]}>
-                        <ResearchUpload />
                       </ProtectedRoute>
                     }
                   />
@@ -857,6 +849,14 @@ const App = () => (
                     element={
                       <ProtectedRoute allowedRoles={["admin"]}>
                         <AdminCoupons />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/admin/support-requests"
+                    element={
+                      <ProtectedRoute allowedRoles={["admin"]}>
+                        <AdminSupportRequests />
                       </ProtectedRoute>
                     }
                   />

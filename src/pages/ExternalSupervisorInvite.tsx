@@ -19,11 +19,33 @@ interface InviteDetails {
   expires_at: string;
 }
 
+const createUuid = () => {
+  const cryptoApi = globalThis.crypto;
+  if (typeof cryptoApi?.randomUUID === "function") {
+    return cryptoApi.randomUUID();
+  }
+
+  if (typeof cryptoApi?.getRandomValues === "function") {
+    const bytes = cryptoApi.getRandomValues(new Uint8Array(16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (char) => {
+    const rand = Math.floor(Math.random() * 16);
+    const value = char === "x" ? rand : (rand & 0x3) | 0x8;
+    return value.toString(16);
+  });
+};
+
 export default function ExternalSupervisorInvite() {
   const [searchParams] = useSearchParams();
   const inviteCode = searchParams.get("code");
   const [invite, setInvite] = useState<InviteDetails | null>(null);
   const [studentName, setStudentName] = useState<string>("");
+  const [studentEmail, setStudentEmail] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,11 +99,12 @@ export default function ExternalSupervisorInvite() {
       // Get student name
       const { data: studentProfile } = await supabase
         .from("profiles")
-        .select("full_name")
+        .select("full_name, email")
         .eq("user_id", inviteData.student_id)
         .maybeSingle();
 
       setStudentName(studentProfile?.full_name || "A student");
+      setStudentEmail(studentProfile?.email || "");
       setInvite(inviteData);
       setFormData({
         fullName: inviteData.full_name,
@@ -165,14 +188,36 @@ export default function ExternalSupervisorInvite() {
           .eq("id", invite.id);
         if (inviteError) console.error("Invite status update failed:", inviteError);
 
-        // Notify the student
-        await supabase.rpc("create_notification", {
-          _user_id: invite.student_id,
-          _title: "Supervisor Registered",
-          _message: `${formData.fullName} has accepted your invitation and registered as your supervisor.`,
-          _type: "success",
-          _link: "/dashboard/research"
+        const notificationMessage = `${formData.fullName} has accepted your invitation and registered as your supervisor.`;
+
+        const { error: notificationError } = await supabase.from("notifications").insert({
+          id: createUuid(),
+          user_id: invite.student_id,
+          title: "Supervisor Registered",
+          message: notificationMessage,
+          type: "success",
+          link: "/dashboard/research",
+          is_read: false,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
         });
+        if (notificationError) console.error("Student notification failed:", notificationError);
+
+        if (studentEmail) {
+          const { error: emailError } = await supabase.functions.invoke("send-email", {
+            body: {
+              type: "external_supervisor_accepted",
+              to: studentEmail,
+              data: {
+                studentName,
+                supervisorName: formData.fullName,
+                supervisorEmail: invite.email,
+                dashboardLink: `${window.location.origin}/dashboard/research`,
+              },
+            },
+          });
+          if (emailError) console.error("Student email notification failed:", emailError);
+        }
 
         setSuccess(true);
         toast({ 

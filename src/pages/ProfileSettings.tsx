@@ -16,6 +16,7 @@ import { useCurrency } from "@/context/CurrencyContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import ReferralCard from "@/components/ReferralCard";
 import { prepareAvatarImage } from "@/lib/avatarImage";
+import InviteExternalSupervisor from "@/components/InviteExternalSupervisor";
 
 interface Profile {
   full_name: string;
@@ -616,6 +617,26 @@ export default function ProfileSettings() {
             )}
           </CardContent>
         </Card>
+
+        {(profile.researcher_type === 'student' || profile.researcher_type === 'graduate') && (
+          <Card className="shadow-card rounded-2xl border-border/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <GraduationCap className="w-5 h-5 text-primary" />
+                Supervisor Invite
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="font-medium text-foreground">Invite an external supervisor</p>
+                <p className="text-sm text-muted-foreground">
+                  Send an invite link to a supervisor who is not yet on R2P Connect.
+                </p>
+              </div>
+              <InviteExternalSupervisor />
+            </CardContent>
+          </Card>
+        )}
 
         {/* Skills & Job Preferences (for students) */}
         {(profile.researcher_type === 'student' || profile.researcher_type === 'graduate') && (

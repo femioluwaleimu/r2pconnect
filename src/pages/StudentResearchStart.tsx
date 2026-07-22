@@ -19,6 +19,7 @@ import SupervisionTypeSelector from "@/components/ai-supervisor/SupervisionTypeS
 import EthicsBanner from "@/components/ai-supervisor/EthicsBanner";
 import StyleReferenceUpload from "@/components/ai-supervisor/StyleReferenceUpload";
 import InviteExternalSupervisor from "@/components/InviteExternalSupervisor";
+import { createAppNotification } from "@/lib/notifications";
 const RESEARCH_FIELDS = ["Engineering", "Medicine & Health Sciences", "Computer Science", "Agriculture", "Environmental Science", "Business & Economics", "Social Sciences", "Physical Sciences", "Biological Sciences", "Arts & Humanities", "Law", "Education", "Other"];
 const RESEARCH_STAGES = [{
   value: "concept",
@@ -488,12 +489,12 @@ export default function StudentResearchStart() {
           const studentProfile = studentResult.data;
           if (supervisorProfile?.email) {
             // Create in-app notification
-            await supabase.rpc('create_notification', {
-              _user_id: formData.supervisorId,
-              _title: 'New Research Submission',
-              _message: `${studentProfile?.full_name || 'A student'} has submitted "${formData.title}" for your review.`,
-              _type: 'info',
-              _link: '/supervisor/pending'
+            await createAppNotification({
+              userId: formData.supervisorId,
+              title: 'New Research Submission',
+              message: `${studentProfile?.full_name || 'A student'} has submitted "${formData.title}" for your review.`,
+              type: 'info',
+              link: '/supervisor/pending'
             });
 
             // Send email notification

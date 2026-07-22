@@ -38,6 +38,7 @@ import { useSupervisorCredits } from "@/hooks/useSupervisorCredits";
 import { formatLagos } from "@/lib/dateUtils";
 import { cn } from "@/lib/utils";
 import AppLogo from "./AppLogo";
+import SupportChatbot from "@/components/support/SupportChatbot";
 
 interface SupervisorLayoutProps {
   children: React.ReactNode;
@@ -415,6 +416,7 @@ export default function SupervisorLayout({ children }: SupervisorLayoutProps) {
         </header>
         <div className="container mx-auto px-4 py-6 max-w-7xl">{children}</div>
       </main>
+      {user && <SupportChatbot userRole="supervisor" />}
     </div>
   );
 }

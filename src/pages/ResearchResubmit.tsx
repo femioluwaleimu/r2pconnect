@@ -19,6 +19,7 @@ import {
 import AIUsageDeclaration from "@/components/AIUsageDeclaration";
 import ResearchIntegrityIndicators from "@/components/ResearchIntegrityIndicators";
 import SupervisorFeedbackFiles from "@/components/SupervisorFeedbackFiles";
+import { createAppNotification } from "@/lib/notifications";
 
 
 const RESEARCH_FIELDS = [
@@ -232,12 +233,12 @@ export default function ResearchResubmit() {
 
           if (supervisorProfile?.email) {
             // Create in-app notification
-            await supabase.rpc('create_notification', {
-              _user_id: research.supervisor_id,
-              _title: 'Research Resubmitted',
-              _message: `${studentProfile?.full_name || 'A student'} has resubmitted "${formData.title}" for your review.`,
-              _type: 'info',
-              _link: '/supervisor/pending'
+            await createAppNotification({
+              userId: research.supervisor_id,
+              title: 'Research Resubmitted',
+              message: `${studentProfile?.full_name || 'A student'} has resubmitted "${formData.title}" for your review.`,
+              type: 'info',
+              link: '/supervisor/pending'
             });
 
             // Send email notification
@@ -272,12 +273,12 @@ export default function ResearchResubmit() {
 
           if (reviewerProfile?.email) {
             // Create in-app notification for reviewer
-            await supabase.rpc('create_notification', {
-              _user_id: research.reviewer_id,
-              _title: 'Research Resubmitted for Review',
-              _message: `${researcherProfile?.full_name || 'A researcher'} has resubmitted "${formData.title}" after addressing your revision request.`,
-              _type: 'info',
-              _link: '/reviewer/pending'
+            await createAppNotification({
+              userId: research.reviewer_id,
+              title: 'Research Resubmitted for Review',
+              message: `${researcherProfile?.full_name || 'A researcher'} has resubmitted "${formData.title}" after addressing your revision request.`,
+              type: 'info',
+              link: '/reviewer/pending'
             });
 
             // Send email notification to reviewer

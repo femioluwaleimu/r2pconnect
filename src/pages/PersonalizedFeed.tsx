@@ -285,9 +285,12 @@ export default function PersonalizedFeed() {
                     <BookOpen className="w-8 h-8 text-primary" />
                   </div>
                   <h3 className="text-lg font-semibold text-foreground mb-2">No recommendations yet</h3>
-                  <p className="text-muted-foreground mb-4">Upload some research papers to help us understand your interests</p>
-                  <Link to="/dashboard/research/upload">
-                    <Button className="rounded-xl">Upload Research</Button>
+                  <p className="text-muted-foreground mb-4">Start supervised research or upload completed work to help us understand your interests</p>
+                  <Link to="/dashboard/research/start-student">
+                    <Button className="rounded-xl">Start Student Research</Button>
+                  </Link>
+                  <Link to="/dashboard/research/upload-completed" className="ml-2">
+                    <Button variant="outline" className="rounded-xl">Upload Completed Research</Button>
                   </Link>
                 </CardContent>
               </Card>

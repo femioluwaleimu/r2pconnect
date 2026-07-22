@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, UserCheck, Users } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { createAppNotification } from "@/lib/notifications";
 
 interface Reviewer {
   user_id: string;
@@ -160,12 +161,12 @@ export default function ReviewerAssignment({
       const reviewerName = reviewer?.full_name || 'Unknown';
 
       // Create notification for the reviewer
-      const { error: notifyError } = await supabase.rpc('create_notification', {
-        _user_id: selectedReviewer,
-        _title: 'New Research Assignment',
-        _message: `You have been assigned to review: "${paperTitle}"`,
-        _type: 'info',
-        _link: '/reviewer/pending'
+      const { error: notifyError } = await createAppNotification({
+        userId: selectedReviewer,
+        title: 'New Research Assignment',
+        message: `You have been assigned to review: "${paperTitle}"`,
+        type: 'info',
+        link: '/reviewer/pending'
       });
 
       if (notifyError) {

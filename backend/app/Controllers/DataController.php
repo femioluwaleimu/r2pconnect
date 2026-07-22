@@ -189,7 +189,7 @@ class DataController extends Controller {
             $payloadRows = $this->normalizeRows($rows);
             $inserted = [];
             foreach ($payloadRows as $row) {
-                $row = $this->sanitizeRow($row);
+                $row = $this->prepareInsertRow($table, $this->sanitizeRow($row));
                 if (!$row) {
                     continue;
                 }
@@ -338,6 +338,61 @@ class DataController extends Controller {
             }
         }
         return $clean;
+    }
+
+    private function prepareInsertRow(string $table, array $row): array {
+        $columns = $this->tableColumns($table);
+        if (!$columns) {
+            return $row;
+        }
+
+        $row = array_intersect_key($row, $columns);
+        $now = date('Y-m-d H:i:s');
+
+        if (
+            isset($columns['id']) &&
+            (!array_key_exists('id', $row) || $row['id'] === null || $row['id'] === '') &&
+            stripos((string)($columns['id']['Type'] ?? ''), 'char(36)') !== false
+        ) {
+            $row['id'] = generateUUID();
+        }
+
+        if (isset($columns['created_at']) && (!array_key_exists('created_at', $row) || $row['created_at'] === null || $row['created_at'] === '')) {
+            $row['created_at'] = $now;
+        }
+
+        if (isset($columns['updated_at']) && (!array_key_exists('updated_at', $row) || $row['updated_at'] === null || $row['updated_at'] === '')) {
+            $row['updated_at'] = $now;
+        }
+
+        return $row;
+    }
+
+    private function tableColumns(string $table): array {
+        static $cache = [];
+        $table = $this->identifier($table);
+        if (!$table) {
+            return [];
+        }
+
+        if (isset($cache[$table])) {
+            return $cache[$table];
+        }
+
+        try {
+            $rows = $this->db->getAll("SHOW COLUMNS FROM `{$table}`");
+            $cache[$table] = [];
+            foreach ($rows as $row) {
+                if (!empty($row['Field'])) {
+                    $cache[$table][(string)$row['Field']] = $row;
+                }
+            }
+        } catch (\Throwable $e) {
+            error_log("Column lookup failed for {$table}: " . $e->getMessage());
+            $cache[$table] = [];
+        }
+
+        return $cache[$table];
     }
 
     private function normalizeValue(mixed $value): mixed {

@@ -24,7 +24,6 @@ const routeImports: Record<string, PrefetchFn> = {
   // Researcher Dashboard
   "/dashboard": () => import("@/pages/Dashboard"),
   "/dashboard/research": () => import("@/pages/MyResearch"),
-  "/dashboard/research/upload": () => import("@/pages/ResearchUpload"),
   "/dashboard/research/start-student": () => import("@/pages/StudentResearchStart"),
   "/dashboard/research/upload-completed": () => import("@/pages/CompletedResearchUpload"),
   "/dashboard/browse": () => import("@/pages/BrowseResearch"),

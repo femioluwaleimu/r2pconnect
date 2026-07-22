@@ -16,7 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useCurrency } from "@/context/CurrencyContext";
 import { formatLagos } from "@/lib/dateUtils";
 import { AI_CREDIT_EXHAUSTED_MESSAGE, friendlyErrorMessage } from "@/lib/errorMessage";
-import { formatAmount, toNumber } from "@/lib/numberFormat";
+import { toNumber } from "@/lib/numberFormat";
 import {
   FileText,
   Eye,
@@ -68,7 +68,7 @@ export default function Dashboard() {
   const [stats, setStats] = useState({ papers: 0, views: 0, credits: 0 });
   const { creditsRemaining, aiCredits, refresh: refreshCredits } = useAICredits();
   const { toast } = useToast();
-  const { currency, formatCurrency } = useCurrency();
+  const { formatCurrency } = useCurrency();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -401,10 +401,15 @@ export default function Dashboard() {
                   <FileText className="w-8 h-8 text-muted-foreground/40" />
                 </div>
                 <p className="text-muted-foreground mb-4 font-medium">No research uploaded yet</p>
-                <Link to="/dashboard/research/upload">
+                <Link to="/dashboard/research/start-student">
                   <Button variant="outline" size="sm" className="rounded-xl">
                     <Plus className="w-4 h-4 mr-2" />
-                    Upload Your First Research
+                    Start Student Research
+                  </Button>
+                </Link>
+                <Link to="/dashboard/research/upload-completed" className="mt-2">
+                  <Button variant="ghost" size="sm" className="rounded-xl">
+                    Upload Completed Research
                   </Button>
                 </Link>
               </div>
@@ -446,8 +451,7 @@ export default function Dashboard() {
                           <p className="font-semibold text-sm text-foreground line-clamp-2 mb-2">{challenge.title}</p>
                           <div className="flex flex-wrap items-center gap-2">
                             <Badge className="bg-emerald-500/20 text-emerald-600 text-xs rounded-full font-bold">
-                              {challenge.reward_currency === "NGN" ? "₦" : "$"}
-                              {formatAmount(challenge.reward_amount)}
+                              {formatCurrency(challenge.reward_amount, challenge.reward_currency || "NGN")}
                             </Badge>
                             {daysRemaining !== null && (
                               <span

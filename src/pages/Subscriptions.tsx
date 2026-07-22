@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatLagos } from "@/lib/dateUtils";
+import { normalizeSubscriptionPlan } from "@/lib/subscriptionPlans";
 
 interface SubscriptionPlan {
   id: string;
@@ -58,7 +59,7 @@ export default function Subscriptions() {
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { currency, setCurrency, formatCurrency, loading: ratesLoading } = useCurrency();
+  const { currency, saveCurrencyPreference, formatCurrency, loading: ratesLoading } = useCurrency();
 
   const availableCurrencies = ['USD', 'NGN', 'EUR', 'GBP'];
 
@@ -112,10 +113,7 @@ export default function Subscriptions() {
       .order('sort_order');
 
     if (!error && data) {
-      const parsedPlans = data.map(plan => ({
-        ...plan,
-        features: Array.isArray(plan.features) ? plan.features as string[] : []
-      }));
+      const parsedPlans = data.map(normalizeSubscriptionPlan);
       setPlans(parsedPlans);
     }
     setPlansLoading(false);
@@ -344,7 +342,7 @@ export default function Subscriptions() {
           <div className="flex items-center gap-2 sm:gap-3 bg-card border border-border rounded-xl p-2 sm:p-3">
             <Globe className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground" />
             <span className="text-xs sm:text-sm text-muted-foreground">View prices in:</span>
-            <Select value={currency} onValueChange={setCurrency}>
+            <Select value={currency} onValueChange={saveCurrencyPreference}>
               <SelectTrigger className="w-20 sm:w-24 rounded-lg text-xs sm:text-sm h-8 sm:h-10">
                 <SelectValue />
               </SelectTrigger>

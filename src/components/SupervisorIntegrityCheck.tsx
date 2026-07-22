@@ -20,7 +20,16 @@ interface SupervisorIntegrityCheckProps {
   abstract: string;
   fileUrl: string | null;
   hasExistingCheck: boolean;
-  onCheckComplete: () => void;
+  onCheckComplete: (result?: IntegrityCheckResult) => void;
+}
+
+export interface IntegrityCheckResult {
+  plagiarism_score?: number | null;
+  plagiarism_status?: string | null;
+  ai_content_risk?: string | null;
+  summary?: string | null;
+  recommendations?: string[] | string | null;
+  credits_remaining?: number | null;
 }
 
 export default function SupervisorIntegrityCheck({
@@ -46,7 +55,7 @@ export default function SupervisorIntegrityCheck({
     if (creditsRemaining < 1) {
       toast({
         title: "Insufficient Credits",
-        description: "You don't have enough AI credits to run this check.",
+        description: "You do not have enough supervisor AI credits. You will receive more credits when your students subscribe to a package.",
         variant: "destructive",
       });
       return;
@@ -65,7 +74,7 @@ export default function SupervisorIntegrityCheck({
       if (error) throw error;
 
       if (data?.error) {
-        throw new Error(data.error);
+        throw new Error(data.message || "You do not have enough supervisor AI credits. You will receive more credits when your students subscribe to a package.");
       }
 
       toast({
@@ -77,7 +86,7 @@ export default function SupervisorIntegrityCheck({
 
       // Refresh credits after use
       refreshCredits();
-      onCheckComplete();
+      onCheckComplete(data);
     } catch (error: any) {
       console.error("Integrity check error:", error);
       toast({

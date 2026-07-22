@@ -222,6 +222,7 @@ export default function Auth() {
   // PWA install state
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showInstallButton, setShowInstallButton] = useState(false);
+  const [installDialogOpen, setInstallDialogOpen] = useState(false);
 
   // Referral code from URL
   const referralCode = searchParams.get("ref");
@@ -355,24 +356,25 @@ export default function Auth() {
       window.matchMedia("(display-mode: standalone)").matches ||
       Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone);
 
-    const updateInstallVisibility = (prompt: BeforeInstallPromptEvent | null = deferredPrompt) => {
-      setShowInstallButton(Boolean(prompt) && !isStandalone());
+    const updateInstallVisibility = () => {
+      setShowInstallButton(!isStandalone());
     };
 
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       const promptEvent = e as BeforeInstallPromptEvent;
       setDeferredPrompt(promptEvent);
-      updateInstallVisibility(promptEvent);
+      updateInstallVisibility();
     };
 
     const handleAppInstalled = () => {
       setDeferredPrompt(null);
       setShowInstallButton(false);
+      setInstallDialogOpen(false);
       toast({ title: "App installed", description: "R2P Connect has been added to your home screen." });
     };
     
-    updateInstallVisibility(null);
+    updateInstallVisibility();
     window.addEventListener("beforeinstallprompt", handleBeforeInstallPrompt);
     window.addEventListener("appinstalled", handleAppInstalled);
 
@@ -385,11 +387,14 @@ export default function Auth() {
       window.removeEventListener("appinstalled", handleAppInstalled);
       displayModeQuery.removeEventListener?.("change", handleDisplayModeChange);
     };
-  }, [deferredPrompt, toast]);
+  }, [toast]);
   
-  const handleInstallClick = async () => {
+  const handleInstallClick = () => {
+    setInstallDialogOpen(true);
+  };
+
+  const handleInstallPrompt = async () => {
     if (!deferredPrompt) {
-      setShowInstallButton(false);
       return;
     }
     
@@ -402,6 +407,7 @@ export default function Auth() {
     }
     setDeferredPrompt(null);
     setShowInstallButton(false);
+    setInstallDialogOpen(false);
   };
 
   // Check if user is already logged in and redirect
@@ -803,6 +809,9 @@ export default function Auth() {
   };
 
   const showInstitutionSelector = selectedRole === "researcher" || selectedRole === "supervisor";
+  const isIosDevice =
+    typeof window !== "undefined" &&
+    /iphone|ipad|ipod/i.test(window.navigator.userAgent);
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -1352,6 +1361,70 @@ export default function Auth() {
           </Card>
         </div>
       </div>
+
+      {/* Install App Dialog */}
+      <Dialog open={installDialogOpen} onOpenChange={setInstallDialogOpen}>
+        <DialogContent className="max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Download className="w-5 h-5 text-primary" />
+              Install R2P Connect
+            </DialogTitle>
+            <DialogDescription>
+              Add R2P Connect to your device for quicker access from your home screen.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="rounded-xl border bg-muted/40 p-4 space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  <Phone className="w-4 h-4 text-primary" />
+                </div>
+                <div>
+                  <h4 className="font-semibold text-sm text-foreground">Use it like a mobile app</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Open R2P Connect faster, keep it on your home screen, and get a cleaner full-screen experience.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {deferredPrompt ? (
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" onClick={() => setInstallDialogOpen(false)} className="rounded-xl">
+                  Not now
+                </Button>
+                <Button onClick={handleInstallPrompt} className="rounded-xl">
+                  <Download className="w-4 h-4 mr-2" />
+                  Install now
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="space-y-2 text-sm text-muted-foreground">
+                  {isIosDevice ? (
+                    <>
+                      <p>On iPhone or iPad, open this page in Safari, tap Share, then choose Add to Home Screen.</p>
+                    </>
+                  ) : (
+                    <p>
+                      If your browser does not show the install prompt, open the browser menu and choose Install app or
+                      Add to Home screen.
+                    </p>
+                  )}
+                </div>
+                <div className="flex justify-end">
+                  <Button onClick={() => setInstallDialogOpen(false)} className="rounded-xl">
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Got it
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Forgot Password Dialog */}
       <Dialog open={forgotPasswordOpen} onOpenChange={setForgotPasswordOpen}>

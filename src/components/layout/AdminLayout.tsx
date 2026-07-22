@@ -26,6 +26,7 @@ import {
   GraduationCap,
   Percent,
   DollarSign,
+  MessageCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -42,6 +43,7 @@ const sidebarItems = [
   { icon: Crown, label: "Subscriptions", href: "/admin/subscriptions" },
   { icon: Wallet, label: "Withdrawals", href: "/admin/withdrawals" },
   { icon: Tag, label: "Coupons", href: "/admin/coupons" },
+  { icon: MessageCircle, label: "Support Inbox", href: "/admin/support-requests" },
   { icon: GraduationCap, label: "Supervisors", href: "/admin/supervisors" },
   { icon: Shield, label: "FAQ", href: "/admin/faq" },
   { icon: Percent, label: "Commissions", href: "/admin/commission-settings" },

@@ -47,17 +47,71 @@ export default function SupervisorResearch() {
   const fetchResearch = async (userId: string) => {
     setLoading(true);
 
-    const { data: papers } = await supabase
+    const columns = "id, title, research_field, supervisor_approval_status, status, created_at, author_id";
+
+    const { data: primaryPapers } = await supabase
       .from("research_papers")
-      .select("id, title, research_field, supervisor_approval_status, status, created_at, author_id")
+      .select(columns)
       .eq("supervisor_id", userId)
-      .eq("research_type", "student")
       .order("created_at", { ascending: false });
 
-    if (papers) {
-      const authorIds = [...new Set(papers.map((p) => p.author_id))];
+    const { data: coSupervisorPapers } = await supabase
+      .from("research_papers")
+      .select(columns)
+      .eq("co_supervisor_id", userId)
+      .order("created_at", { ascending: false });
+
+    const { data: assignedStudents } = await supabase
+      .from("profiles")
+      .select("user_id")
+      .eq("assigned_supervisor_id", userId);
+
+    const assignedStudentIds = (assignedStudents || []).map((student) => student.user_id).filter(Boolean);
+    const { data: assignedStudentPapers } = assignedStudentIds.length
+      ? await supabase
+          .from("research_papers")
+          .select(columns)
+          .in("author_id", assignedStudentIds)
+          .order("created_at", { ascending: false })
+      : { data: [] };
+
+    const { data: supervisorProfile } = await supabase
+      .from("profiles")
+      .select("email")
+      .eq("user_id", userId)
+      .maybeSingle();
+
+    const supervisorEmail = String(supervisorProfile?.email || user?.email || "").toLowerCase();
+    const { data: acceptedInvites } = supervisorEmail
+      ? await supabase
+          .from("external_supervisor_invites")
+          .select("student_id")
+          .eq("email", supervisorEmail)
+          .eq("status", "accepted")
+      : { data: [] };
+
+    const invitedStudentIds = (acceptedInvites || []).map((invite) => invite.student_id).filter(Boolean);
+    const { data: invitedStudentPapers } = invitedStudentIds.length
+      ? await supabase
+          .from("research_papers")
+          .select(columns)
+          .in("author_id", invitedStudentIds)
+          .order("created_at", { ascending: false })
+      : { data: [] };
+
+    const paperMap = new Map<string, any>();
+    [...(primaryPapers || []), ...(coSupervisorPapers || []), ...(assignedStudentPapers || []), ...(invitedStudentPapers || [])].forEach((paper) => {
+      if (paper?.id) paperMap.set(paper.id, paper);
+    });
+
+    const papers = Array.from(paperMap.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    if (papers.length > 0) {
+      const authorIds = [...new Set(papers.map((p) => p.author_id).filter(Boolean))];
       const { data: profiles } = await supabase
-        .from("public_profiles")
+        .from("profiles")
         .select("user_id, full_name, avatar_url")
         .in("user_id", authorIds);
 
@@ -73,6 +127,8 @@ export default function SupervisorResearch() {
       }));
 
       setResearch(researchWithAuthors);
+    } else {
+      setResearch([]);
     }
 
     setLoading(false);

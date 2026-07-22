@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { handleEdgeFunctionResponse } from "@/lib/edgeFunctionError";
 import { useCurrency } from "@/context/CurrencyContext";
+import { normalizeSubscriptionPlan } from "@/lib/subscriptionPlans";
 import {
   ArrowLeft, Check, Loader2, Tag, Sparkles, CreditCard,
   Percent, Shield, Zap, X, CheckCircle2
@@ -71,10 +72,7 @@ export default function IndustrySubscriptionSummary() {
         return;
       }
 
-      setPlan({
-        ...planData,
-        features: Array.isArray(planData.features) ? planData.features as string[] : []
-      });
+      setPlan(normalizeSubscriptionPlan(planData));
       setLoading(false);
     };
     init();

@@ -14,7 +14,8 @@ import {
 import { ArrowLeft, Receipt, Download, Eye, CreditCard } from "lucide-react";
 import { Link } from "react-router-dom";
 import { formatLagos } from "@/lib/dateUtils";
-import { formatAmount as formatPlainAmount, toNumber } from "@/lib/numberFormat";
+import { toNumber } from "@/lib/numberFormat";
+import { useCurrency } from "@/context/CurrencyContext";
 
 interface PaymentRecord {
   id: string;
@@ -34,6 +35,7 @@ export default function PaymentHistory() {
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPayment, setSelectedPayment] = useState<PaymentRecord | null>(null);
+  const { formatCurrency } = useCurrency();
 
   useEffect(() => {
     fetchPayments();
@@ -62,11 +64,6 @@ export default function PaymentHistory() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const formatAmount = (amount: number, currency: string) => {
-    const symbol = currency === "NGN" ? "₦" : currency === "USD" ? "$" : currency;
-    return `${symbol}${formatPlainAmount(amount)}`;
   };
 
   return (
@@ -118,7 +115,7 @@ export default function PaymentHistory() {
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="text-right">
-                      <p className="font-semibold text-foreground">{formatAmount(payment.amount, payment.currency)}</p>
+                      <p className="font-semibold text-foreground">{formatCurrency(payment.amount, payment.currency || "NGN")}</p>
                       {payment.coupon_code && (
                         <p className="text-[10px] text-emerald-600">Coupon: {payment.coupon_code}</p>
                       )}
@@ -177,14 +174,14 @@ export default function PaymentHistory() {
                       {selectedPayment.discount_amount && selectedPayment.discount_amount > 0 && (
                         <div className="flex justify-between text-sm">
                           <span className="text-muted-foreground">Discount</span>
-                          <span className="text-emerald-600">-{formatAmount(selectedPayment.discount_amount, selectedPayment.currency)}</span>
+                          <span className="text-emerald-600">-{formatCurrency(selectedPayment.discount_amount, selectedPayment.currency || "NGN")}</span>
                         </div>
                       )}
                     </>
                   )}
                   <div className="border-t pt-3 flex justify-between">
                     <span className="font-semibold text-foreground">Amount Paid</span>
-                    <span className="font-bold text-lg text-foreground">{formatAmount(selectedPayment.amount, selectedPayment.currency)}</span>
+                    <span className="font-bold text-lg text-foreground">{formatCurrency(selectedPayment.amount, selectedPayment.currency || "NGN")}</span>
                   </div>
                 </div>
               </div>

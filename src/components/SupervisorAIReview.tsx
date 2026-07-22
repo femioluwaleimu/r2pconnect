@@ -30,6 +30,197 @@ interface AIReviewResult {
   recommended_action: "approve" | "revision" | "needs_attention";
 }
 
+const asStringArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value.map(String).map((item) => item.trim()).filter(Boolean);
+  }
+
+  if (typeof value === "string") {
+    return value
+      .split(/\n|;/)
+      .map((item) => item.replace(/^[-*\d.)\s]+/, "").trim())
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
+const asScore = (value: unknown, fallback = 5): number => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(0, Math.min(10, Math.round(parsed)));
+};
+
+const normalizeRiskLevel = (value: unknown): "low" | "medium" | "high" => {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized.includes("high")) return "high";
+  if (normalized.includes("medium") || normalized.includes("moderate")) return "medium";
+  return "low";
+};
+
+const normalizeRecommendedAction = (value: unknown): "approve" | "revision" | "needs_attention" => {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized.includes("approve")) return "approve";
+  if (normalized.includes("attention") || normalized.includes("reject")) return "needs_attention";
+  return "revision";
+};
+
+const extractJsonObject = (text: string): unknown | null => {
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return null;
+    }
+  }
+};
+
+const normalizeAIReviewResult = (rawResult: string): AIReviewResult => {
+  const parsed = extractJsonObject(rawResult);
+
+  if (parsed && typeof parsed === "object") {
+    const data = parsed as Record<string, any>;
+    const methodology = data.methodology_assessment || data.methodology || data.methodologyAssessment || {};
+    const ethics = data.ethical_concerns || data.ethics || data.ethicalAssessment || {};
+    const objectives = data.objectives_clarity || data.objectives || data.objectivesClarity || {};
+
+    return {
+      methodology_assessment: {
+        score: asScore(methodology.score ?? methodology.rating ?? methodology.methodology_score),
+        strengths: asStringArray(methodology.strengths),
+        weaknesses: asStringArray(methodology.weaknesses ?? methodology.weak_areas ?? methodology.concerns),
+        suggestions: asStringArray(methodology.suggestions ?? methodology.recommendations),
+      },
+      ethical_concerns: {
+        risk_level: normalizeRiskLevel(ethics.risk_level ?? ethics.risk ?? ethics.level),
+        flags: asStringArray(ethics.flags ?? ethics.concerns),
+        recommendations: asStringArray(ethics.recommendations ?? ethics.suggestions),
+      },
+      objectives_clarity: {
+        score: asScore(objectives.score ?? objectives.rating ?? objectives.clarity_score),
+        feedback: String(objectives.feedback ?? objectives.summary ?? "Review the objectives for clarity, measurability, and alignment with the stated methodology."),
+        improved_objectives: asStringArray(objectives.improved_objectives ?? objectives.suggested_objectives ?? objectives.objectives),
+      },
+      overall_feedback: String(data.overall_feedback ?? data.summary ?? data.feedback ?? rawResult),
+      recommended_action: normalizeRecommendedAction(data.recommended_action ?? data.action ?? data.recommendation),
+    };
+  }
+
+  return {
+    methodology_assessment: {
+      score: 5,
+      strengths: [],
+      weaknesses: [],
+      suggestions: ["Review the generated feedback and use it as advisory guidance for your supervisor decision."],
+    },
+    ethical_concerns: {
+      risk_level: "low",
+      flags: [],
+      recommendations: [],
+    },
+    objectives_clarity: {
+      score: 5,
+      feedback: "The AI response was returned as narrative feedback rather than structured scores.",
+      improved_objectives: [],
+    },
+    overall_feedback: rawResult,
+    recommended_action: "revision",
+  };
+};
+
+const escapeHtml = (value: string): string =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
+const formatInlineMarkdown = (value: string): string =>
+  escapeHtml(value)
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.*?)\*/g, "<em>$1</em>");
+
+const formatReviewHtml = (value: string): string => {
+  const prepared = value
+    .replace(/\r/g, "")
+    .replace(/---/g, "\n\n")
+    .replace(/\s+(#{2,4}\s+)/g, "\n\n$1")
+    .replace(/\s+(\*\*[^*]{2,90}:?\*\*)/g, "\n$1")
+    .replace(/\s+(\d+\.\s+)/g, "\n$1")
+    .replace(/\s+([-*]\s+)/g, "\n$1")
+    .trim();
+
+  const lines = prepared.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const html: string[] = [];
+  let listType: "ol" | "ul" | null = null;
+
+  const closeList = () => {
+    if (listType) {
+      html.push(`</${listType}>`);
+      listType = null;
+    }
+  };
+
+  lines.forEach((line) => {
+    const heading = line.match(/^#{2,4}\s+(.+)$/);
+    if (heading) {
+      closeList();
+      html.push(`<h3>${formatInlineMarkdown(heading[1])}</h3>`);
+      return;
+    }
+
+    const numbered = line.match(/^\d+\.\s+(.+)$/);
+    if (numbered) {
+      if (listType !== "ol") {
+        closeList();
+        listType = "ol";
+        html.push("<ol>");
+      }
+      html.push(`<li>${formatInlineMarkdown(numbered[1])}</li>`);
+      return;
+    }
+
+    const bullet = line.match(/^[-*]\s+(.+)$/);
+    if (bullet) {
+      if (listType !== "ul") {
+        closeList();
+        listType = "ul";
+        html.push("<ul>");
+      }
+      html.push(`<li>${formatInlineMarkdown(bullet[1])}</li>`);
+      return;
+    }
+
+    closeList();
+    html.push(`<p>${formatInlineMarkdown(line)}</p>`);
+  });
+
+  closeList();
+  return html.join("");
+};
+
+const FormattedReviewText = ({ value }: { value: string }) => (
+  <div
+    className="prose prose-sm max-w-none text-muted-foreground prose-headings:text-foreground prose-headings:mt-4 prose-headings:mb-2 prose-p:my-2 prose-strong:text-foreground prose-ol:my-3 prose-ul:my-3 prose-li:my-1"
+    dangerouslySetInnerHTML={{ __html: formatReviewHtml(value) }}
+  />
+);
+
+const FormattedInlineText = ({ value }: { value: string }) => (
+  <span dangerouslySetInnerHTML={{ __html: formatInlineMarkdown(value) }} />
+);
+
 interface SupervisorAIReviewProps {
   researchId: string;
   title: string;
@@ -226,42 +417,13 @@ ${solutionApproach ? `Solution Approach: ${solutionApproach}` : ""}
         return;
       }
 
-      try {
-        // Clean the result - remove markdown code blocks if present
-        let cleanResult = data.result;
-        // More robust cleaning of markdown code blocks
-        cleanResult = cleanResult.trim();
-        if (cleanResult.startsWith("```json")) {
-          cleanResult = cleanResult.slice(7);
-        } else if (cleanResult.startsWith("```")) {
-          cleanResult = cleanResult.slice(3);
-        }
-        if (cleanResult.endsWith("```")) {
-          cleanResult = cleanResult.slice(0, -3);
-        }
-        cleanResult = cleanResult.trim();
-        
-        const parsed = JSON.parse(cleanResult);
-        
-        // Validate the structure
-        if (!parsed.methodology_assessment || !parsed.ethical_concerns || !parsed.objectives_clarity) {
-          throw new Error("Invalid response structure");
-        }
-        
-        setResult(parsed);
-        onReviewComplete?.(parsed);
-        toast({ 
-          title: "AI Review Complete", 
-          description: `Credits remaining: ${data.credits_remaining}` 
-        });
-      } catch (parseError) {
-        console.error("Error parsing AI response:", parseError, "Raw result:", data.result);
-        toast({ 
-          title: "Parse Error", 
-          description: "Could not parse AI response. Please try again.", 
-          variant: "destructive" 
-        });
-      }
+      const parsed = normalizeAIReviewResult(String(data.result));
+      setResult(parsed);
+      onReviewComplete?.(parsed);
+      toast({
+        title: "AI Review Complete",
+        description: typeof data.credits_remaining === "number" ? `Credits remaining: ${data.credits_remaining}` : "Review generated successfully.",
+      });
     } catch (error: any) {
       console.error("AI review error:", error);
       toast({ 
@@ -349,7 +511,7 @@ ${solutionApproach ? `Solution Approach: ${solutionApproach}` : ""}
               </div>
             </div>
             <CardContent className="p-6">
-              <p className="text-muted-foreground">{result.overall_feedback}</p>
+              <FormattedReviewText value={result.overall_feedback} />
             </CardContent>
           </Card>
 
@@ -372,7 +534,7 @@ ${solutionApproach ? `Solution Approach: ${solutionApproach}` : ""}
                     {result.methodology_assessment.strengths.map((s, i) => (
                       <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
                         <CheckCircle className="w-4 h-4 text-emerald-500 mt-0.5 flex-shrink-0" />
-                        {s}
+                        <FormattedInlineText value={s} />
                       </li>
                     ))}
                   </ul>
@@ -385,7 +547,7 @@ ${solutionApproach ? `Solution Approach: ${solutionApproach}` : ""}
                     {result.methodology_assessment.weaknesses.map((w, i) => (
                       <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
                         <AlertTriangle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
-                        {w}
+                        <FormattedInlineText value={w} />
                       </li>
                     ))}
                   </ul>
@@ -398,7 +560,7 @@ ${solutionApproach ? `Solution Approach: ${solutionApproach}` : ""}
                     {result.methodology_assessment.suggestions.map((s, i) => (
                       <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
                         <Lightbulb className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
-                        {s}
+                        <FormattedInlineText value={s} />
                       </li>
                     ))}
                   </ul>
@@ -426,7 +588,7 @@ ${solutionApproach ? `Solution Approach: ${solutionApproach}` : ""}
                     {result.ethical_concerns.flags.map((f, i) => (
                       <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
                         <AlertTriangle className="w-4 h-4 text-orange-500 mt-0.5 flex-shrink-0" />
-                        {f}
+                        <FormattedInlineText value={f} />
                       </li>
                     ))}
                   </ul>
@@ -441,7 +603,7 @@ ${solutionApproach ? `Solution Approach: ${solutionApproach}` : ""}
                     {result.ethical_concerns.recommendations.map((r, i) => (
                       <li key={i} className="text-sm text-muted-foreground flex items-start gap-2">
                         <Lightbulb className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
-                        {r}
+                        <FormattedInlineText value={r} />
                       </li>
                     ))}
                   </ul>
@@ -462,7 +624,7 @@ ${solutionApproach ? `Solution Approach: ${solutionApproach}` : ""}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">{result.objectives_clarity.feedback}</p>
+              <FormattedReviewText value={result.objectives_clarity.feedback} />
               {result.objectives_clarity.improved_objectives.length > 0 && (
                 <div>
                   <p className="text-sm font-medium text-primary mb-2">Suggested Improved Objectives</p>
@@ -472,7 +634,7 @@ ${solutionApproach ? `Solution Approach: ${solutionApproach}` : ""}
                         <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs flex items-center justify-center flex-shrink-0">
                           {i + 1}
                         </span>
-                        {o}
+                        <FormattedInlineText value={o} />
                       </li>
                     ))}
                   </ul>

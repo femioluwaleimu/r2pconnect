@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS support_requests (
+    id CHAR(36) PRIMARY KEY COMMENT 'UUID',
+    user_id CHAR(36) NULL,
+    user_role VARCHAR(50) NULL,
+    contact_name VARCHAR(255) NULL,
+    contact_email VARCHAR(255) NULL,
+    title VARCHAR(255) NOT NULL,
+    message LONGTEXT NOT NULL,
+    bot_answer LONGTEXT NULL,
+    page_path VARCHAR(500) NULL,
+    status VARCHAR(50) DEFAULT 'open',
+    admin_notes LONGTEXT NULL,
+    resolved_at TIMESTAMP NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+    INDEX idx_status (status),
+    INDEX idx_user (user_id),
+    INDEX idx_created_at (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { VideoPreviewModal } from "@/components/VideoPreviewModal";
 import { getSignedUrl, isFullUrl } from "@/hooks/useSignedUrl";
 import { formatLagos } from "@/lib/dateUtils";
+import { createAppNotification } from "@/lib/notifications";
 
 interface Documentary {
   id: string;
@@ -226,12 +227,12 @@ export default function AdminDocumentaries() {
       }
 
       // Create in-app notification
-      await supabase.rpc('create_notification', {
-        _user_id: researcherId,
-        _title: 'You were tagged in a documentary!',
-        _message: `You have been featured in the documentary "${documentaryTitle}".`,
-        _type: 'success',
-        _link: '/dashboard/documentaries'
+      await createAppNotification({
+        userId: researcherId,
+        title: 'You were tagged in a documentary!',
+        message: `You have been featured in the documentary "${documentaryTitle}".`,
+        type: 'success',
+        link: '/dashboard/documentaries'
       });
 
     } catch (error) {

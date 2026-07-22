@@ -35,6 +35,8 @@ try {
     $router->post('/functions/{name}', 'FunctionController@invoke');
     $router->get('/cron/email-digests/{secret}', 'FunctionController@runEmailDigests');
     $router->get('/cron/email-digests/{secret}/{mode}', 'FunctionController@runEmailDigests');
+    $router->get('/cron/email-queue/{secret}', 'FunctionController@runEmailQueue');
+    $router->get('/cron/subscription-expiry-reminders/{secret}', 'FunctionController@runSubscriptionExpiryReminders');
     $router->post('/storage/{bucket}/upload', 'StorageController@upload');
     $router->post('/storage/{bucket}/signed-url', 'StorageController@signedUrl');
     $router->get('/storage/{bucket}/public/{path}', 'StorageController@publicFile');

@@ -347,6 +347,22 @@ export const supabase = {
             }),
           });
         }
+
+        if (values.data) {
+          const user = getStoredUser();
+          const token = getToken();
+          if (user && token) {
+            const updatedUser = {
+              ...user,
+              user_metadata: {
+                ...(user.user_metadata ?? {}),
+                ...values.data,
+              },
+            };
+            storeSession(token, updatedUser);
+          }
+        }
+
         return { data: { user: getStoredUser() }, error: null };
       } catch (error) {
         return { data: { user: getStoredUser() }, error };
